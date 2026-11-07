@@ -6,6 +6,7 @@ import com.creaturestudio.data.CreaturePart;
 import com.creaturestudio.data.MaterialIds;
 import com.creaturestudio.data.PaintLayout;
 import com.creaturestudio.data.PartAnim;
+import com.creaturestudio.data.PoseSolver;
 import com.creaturestudio.data.SkinLayout;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
@@ -149,7 +150,7 @@ public final class VanillaModels {
             def.parts = c.parts;
             c.assignUv(def);
             def.name = e.name().getString();
-            assignAnimations(def.parts);
+            assignAnimations(def.parts, e.model());
             def.centerOnGround();
             return def;
         } catch (Exception | LinkageError ex) {
@@ -219,8 +220,10 @@ public final class VanillaModels {
                 }
                 count++;
             }
-            if (first < 0 && rotated && !children.isEmpty() && parts.size() < CreatureDefinition.MAX_PARTS) {
-                // Grupo sin cubos pero con giro: hace falta una pieza vacia que lo lleve.
+            boolean animated = animFor(name, false) != PartAnim.NONE;
+            if (first < 0 && (rotated || animated) && !children.isEmpty() && parts.size() < CreatureDefinition.MAX_PARTS) {
+                // Grupo sin cubos pero con giro o que Minecraft anima (la cabeza del lobo, por ejemplo): hace falta
+                // una pieza vacia que lo lleve para que sus hijas giren con el.
                 CreaturePart g = CreaturePart.box(name, px, 24f - py, pz, 0f, 0f, 0f);
                 g.pivotAt(px, 24f - py, pz);
                 setRotation(g, part);
@@ -233,8 +236,8 @@ public final class VanillaModels {
             int node = first >= 0 ? first : parent;
             for (Map.Entry<?, ?> child : children.entrySet()) {
                 String childName = String.valueOf(child.getKey());
-                if (HIDDEN.contains(childName)) {
-                    continue; // la capa y las orejas de deadmau5 del jugador solo se ven en casos especiales
+                if (hidden(childName, children)) {
+                    continue;
                 }
                 walk((ModelPart) child.getValue(), childName, node, px, py, pz);
             }
@@ -499,8 +502,21 @@ public final class VanillaModels {
         return new float[]{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
     }
 
-    /** Animaciones del editor segun el nombre de la pieza de Minecraft. */
+    /**
+     * Animaciones del editor segun los nombres de las piezas de Minecraft y su jerarquia. Antes se cuelgan las piezas
+     * que en el juego siguen a otra (ver FOLLOWS) y luego cada movimiento va solo en la pieza de mas arriba de su
+     * cadena: en el caballo gira "head_parts" (cuello, cabeza, hocico y crin juntos), no solo "head".
+     */
     static void assignAnimations(List<CreaturePart> parts) {
+        assignAnimations(parts, "");
+    }
+
+    /** @param model id del modelo (p. ej. "minecraft:cod"): los peces no giran la cabeza por separado del cuerpo. */
+    static void assignAnimations(List<CreaturePart> parts, String model) {
+        ResourceLocation id = ResourceLocation.tryParse(model);
+        String path = id == null ? model : id.getPath();
+        boolean fish = path.equals("cod") || path.equals("salmon") || path.startsWith("pufferfish")
+                || path.startsWith("tropical_fish") || path.equals("tadpole");
         boolean spider = false;
         for (CreaturePart p : parts) {
             if (p.name.contains("middle") && p.name.contains("leg")) {
@@ -508,9 +524,62 @@ public final class VanillaModels {
                 break;
             }
         }
-        for (CreaturePart p : parts) {
-            p.anim = animFor(p.name, spider);
+        attachFollowers(parts);
+        PartAnim[] raw = new PartAnim[parts.size()];
+        for (int i = 0; i < raw.length; i++) {
+            raw[i] = animFor(parts.get(i).name, spider);
         }
+        int[] parent = PoseSolver.safeParents(parts);
+        for (int i = 0; i < raw.length; i++) {
+            PartAnim a = raw[i];
+            if (a != PartAnim.NONE) {
+                int steps = 0;
+                for (int up = parent[i]; up >= 0 && steps <= raw.length; up = parent[up], steps++) {
+                    if (family(raw[up]) == family(a)) {
+                        a = PartAnim.NONE; // ya se mueve con su antecesora (la cabeza de dentro, la punta del ala...)
+                        break;
+                    }
+                }
+            }
+            if (fish && a == PartAnim.HEAD) {
+                a = PartAnim.NONE;
+            }
+            parts.get(i).anim = a;
+        }
+    }
+
+    /** Cuelga cada pieza de FOLLOWS de su guia si estan al mismo nivel (sin cambiar como se ven). */
+    static void attachFollowers(List<CreaturePart> parts) {
+        for (int i = 0; i < parts.size(); i++) {
+            String leaderName = FOLLOWS.get(parts.get(i).name);
+            if (leaderName == null) {
+                continue;
+            }
+            int leader = -1;
+            for (int j = 0; j < parts.size(); j++) {
+                if (j != i && parts.get(j).name.equals(leaderName)) {
+                    leader = j;
+                    break;
+                }
+            }
+            if (leader < 0 || parts.get(leader).parent != parts.get(i).parent
+                    || PoseSolver.isDescendant(parts, leader, i)) {
+                continue; // ya esta colgada de ella (o de algo suyo), o no tiene a quien seguir
+            }
+            PoseSolver.reparentKeepingPose(parts, i, leader);
+        }
+    }
+
+    /** Tipo de movimiento sin lado (las dos alas, las cuatro patas...). */
+    private static int family(PartAnim a) {
+        return switch (a) {
+            case NONE -> -1;
+            case WING_A, WING_B -> 1;
+            case LEG_A, LEG_B -> 2;
+            case ARM_A, ARM_B -> 3;
+            case SIDE_LEG_A, SIDE_LEG_B -> 4;
+            default -> 10 + a.ordinal();
+        };
     }
 
     static PartAnim animFor(String name, boolean spider) {
@@ -526,22 +595,71 @@ public final class VanillaModels {
                 }
             }
         }
-        return switch (name) {
-            case "head" -> PartAnim.HEAD;
-            case "right_leg", "right_hind_leg", "left_front_leg" -> PartAnim.LEG_A;
-            case "left_leg", "left_hind_leg", "right_front_leg" -> PartAnim.LEG_B;
-            case "right_arm" -> PartAnim.ARM_A;
-            case "left_arm" -> PartAnim.ARM_B;
-            case "tail" -> PartAnim.TAIL;
-            case "left_wing" -> PartAnim.WING_A;
-            case "right_wing" -> PartAnim.WING_B;
-            case "jaw" -> PartAnim.JAW;
-            default -> PartAnim.NONE;
-        };
+        switch (name) {
+            case "head", "head_parts", "real_head" -> {
+                return PartAnim.HEAD;
+            }
+            case "right_leg", "right_hind_leg", "left_front_leg" -> {
+                return PartAnim.LEG_A;
+            }
+            case "left_leg", "left_hind_leg", "right_front_leg" -> {
+                return PartAnim.LEG_B;
+            }
+            case "right_arm" -> {
+                return PartAnim.ARM_A;
+            }
+            case "left_arm" -> {
+                return PartAnim.ARM_B;
+            }
+            case "jaw", "mouth", "lower_jaw", "lower_beak" -> {
+                return PartAnim.JAW;
+            }
+            default -> {
+            }
+        }
+        if (name.endsWith("_head")) {
+            return PartAnim.HEAD; // las tres cabezas del Wither
+        }
+        if (name.startsWith("tail") || name.equals("real_tail")) {
+            return PartAnim.TAIL; // tail, tail0, tail1, tail_fin...
+        }
+        if (name.startsWith("left_wing")) {
+            return PartAnim.WING_A; // left_wing, left_wing_base (fantasma)...
+        }
+        if (name.startsWith("right_wing")) {
+            return PartAnim.WING_B;
+        }
+        return PartAnim.NONE;
     }
 
-    /** Piezas que el jugador solo ensena en casos especiales. */
-    private static final Set<String> HIDDEN = Set.of("cloak", "ear");
+    /**
+     * Piezas que Minecraft solo ensena en casos especiales: la capa y las orejas de deadmau5 del jugador, la silla, las
+     * riendas y los cofres de caballos, burros, mulas, llamas y camellos.
+     */
+    private static final Set<String> HIDDEN = Set.of("cloak", "ear", "saddle", "head_saddle", "mouth_saddle_wrap",
+            "left_saddle_mouth", "right_saddle_mouth", "left_saddle_line", "right_saddle_line", "bridle", "reins",
+            "left_chest", "right_chest");
+
+    /** true si la pieza no se importa (ver HIDDEN; tambien las piezas de cria y los brazos sueltos de los illagers). */
+    static boolean hidden(String name, Map<?, ?> siblings) {
+        if (HIDDEN.contains(name) || name.contains("baby")) {
+            return true; // las patas de potro van encima de las de adulto
+        }
+        // Los illagers tienen los brazos cruzados y ademas los brazos sueltos (Minecraft solo ensena unos)
+        return (name.equals("left_arm") || name.equals("right_arm")) && siblings.containsKey("arms");
+    }
+
+    /**
+     * Piezas que en Minecraft no cuelgan de otra pero se mueven copiandola (el sombrero copia a la cabeza, las mangas
+     * a los brazos, el pico de la gallina a su cabeza...): al importarlas se cuelgan de ella para que la sigan.
+     */
+    private static final Map<String, String> FOLLOWS = Map.ofEntries(
+            Map.entry("hat", "head"), Map.entry("jacket", "body"),
+            Map.entry("left_sleeve", "left_arm"), Map.entry("right_sleeve", "right_arm"),
+            Map.entry("left_pants", "left_leg"), Map.entry("right_pants", "right_leg"),
+            Map.entry("beak", "head"), Map.entry("red_thing", "head"), Map.entry("nose", "head"),
+            Map.entry("left_ear", "head"), Map.entry("right_ear", "head"), Map.entry("upper_mouth", "head"),
+            Map.entry("tail2", "tail1"));
 
     /** Texturas conocidas (textures/entity/...) de mobs cuyo nombre no coincide con el del modelo. */
     private static final Map<String, String> KNOWN = Map.ofEntries(

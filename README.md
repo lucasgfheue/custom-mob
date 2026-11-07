@@ -15,7 +15,7 @@ fila de **pestañas con iconos** (pasa el ratón por encima para ver su nombre; 
 
 | Pestaña | Qué hay dentro |
 |---|---|
-| **Plantillas** | 9 plantillas del mod y **los modelos de todas las entidades de Minecraft** (con buscador). Pasa el ratón para verlos en 3D; con un clic se cargan con su forma, sus articulaciones y su textura original, listos para editar. |
+| **Plantillas** | 9 plantillas del mod y **los modelos de todas las entidades de Minecraft** (con buscador). Pasa el ratón para verlos en 3D; con un clic se cargan con su forma, sus articulaciones, su textura original y sus animaciones (la cabeza gira con el hocico, las orejas y la crin; el sombrero y las mangas siguen a la cabeza y los brazos), listos para editar. No se cargan las piezas que el mob solo lleva a veces (silla, riendas, cofres, patas de cría). |
 | **Cuerpo** | **Partes del cuerpo ya hechas** (cuerpo de 2 o 4 patas, cabeza, ojos, orejas, cuernos, hocico, antenas, brazos, piernas, patas de araña, cola, alas y aletas): con un clic aparecen colocadas, unidas y animadas. Después, botones para hacerlas más grandes o pequeñas, más anchas, altas o largas, moverlas, y cambiar color y textura, con **simetría** (izquierda y derecha a la vez). |
 | **Piezas** | Árbol con todos los cubos (hasta 128). Añadir, duplicar, espejar en X, borrar, centrar; nombre y «unida a» (jerarquía). |
 | **Forma** | Posición, tamaño, pivote y giro en X/Y/Z (16 píxeles = 1 bloque). |
@@ -55,7 +55,7 @@ montar una criatura pieza a pieza sin tocar números. Pulsa otra vez para volver
 4. Ve a la pestaña **Actions**. La compilación empieza sola (o pulsa **Run workflow**). Tarda unos 5–10 minutos
    la primera vez porque descarga y prepara Minecraft.
 5. Cuando aparezca el círculo verde ✔, entra en la ejecución y descarga el artefacto
-   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.1.0.jar`.
+   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.1.1.jar`.
 
 Para compilar en tu PC: instala Java 21 y ejecuta `gradlew build` (Windows) o `./gradlew build` (Linux/Mac).
 El `.jar` queda en `build/libs/`.
@@ -135,6 +135,9 @@ src/main/resources/        Texturas, modelos, idiomas (es/en), receta y botín
 - **Un modelo de Minecraft sale gris**: el mod no encontró su textura (busca por el nombre del mob, una lista de
   nombres especiales y la carpeta del mob); la forma se carga igual y puedes pintarla o importar su skin.
   Las capas transparentes (chaqueta, sombrero...) ya no salen como cajas grises: quedan invisibles.
+- **Una parte de un modelo de Minecraft no se mueve con la cabeza** (por ejemplo el hocico del burro): pasaba en versiones
+  anteriores. Vuelve a cargar el modelo desde **Plantillas → Modelos de Minecraft**; las criaturas ya
+  guardadas conservan sus animaciones antiguas (puedes cambiarlas en la pestaña **Animar**).
 - **La skin no encaja**: la imagen tiene que tener el formato del modelo que cargaste (por ejemplo, una skin de
   aldeano en el modelo de aldeano). Si tu criatura es propia, usa **Exportar skin** para obtener su plantilla.
 
