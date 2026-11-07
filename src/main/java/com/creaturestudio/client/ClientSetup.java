@@ -16,12 +16,14 @@ import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterColorHandlersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
 /** Registro de todo lo que solo existe en el cliente. */
 public final class ClientSetup {
-    public static final KeyMapping OPEN_STUDIO = new KeyMapping("key.creaturestudio.open",
-            InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, "key.categories.creaturestudio");
+    /** Se crea al registrarla (como recomienda NeoForge), no al cargar la clase. */
+    @Nullable
+    private static KeyMapping openStudio;
 
     private ClientSetup() {
     }
@@ -39,7 +41,9 @@ public final class ClientSetup {
     }
 
     private static void registerKeys(RegisterKeyMappingsEvent event) {
-        event.register(OPEN_STUDIO);
+        openStudio = new KeyMapping("key.creaturestudio.open",
+                InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K, "key.categories.creaturestudio");
+        event.register(openStudio);
     }
 
     private static void registerItemColors(RegisterColorHandlersEvent.Item event) {
@@ -58,8 +62,12 @@ public final class ClientSetup {
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
+        KeyMapping key = openStudio;
+        if (key == null) {
+            return;
+        }
         Minecraft mc = Minecraft.getInstance();
-        while (OPEN_STUDIO.consumeClick()) {
+        while (key.consumeClick()) {
             if (mc.player != null && mc.screen == null) {
                 ClientAccess.openLibrary();
             }
