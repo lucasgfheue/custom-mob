@@ -18,6 +18,10 @@ public class CreatureDefinition {
     public static final int MAX_PARTS = 128;
     /** Maximo de texels pintados a mano por criatura (sumando todas las piezas). */
     public static final int MAX_PAINT_TEXELS = 160_000;
+
+    /** Tamano de la textura (skin) en la que estan las piezas con {@code uvU >= 0}; 0 si no hay. */
+    public int texW;
+    public int texH;
     public static final int NAME_MAX = 32;
 
     public String id = "";
@@ -236,6 +240,15 @@ public class CreatureDefinition {
             p.animSpeed = clamp(p.animSpeed, 0f, 5f);
         }
         sanitizePaint();
+        if (texW < 8 || texH < 8 || texW > 4096 || texH > 4096) {
+            texW = 0;
+            texH = 0;
+        }
+        for (CreaturePart p : parts) {
+            if (texW == 0 || !p.hasUv() || p.uvU >= texW || p.uvV >= texH) {
+                p.clearUv();
+            }
+        }
     }
 
     /** Pintura: alfa 0 o 255 (como las texturas de recorte), sin capas vacias y con un limite total. */

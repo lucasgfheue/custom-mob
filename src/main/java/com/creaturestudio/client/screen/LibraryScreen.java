@@ -432,7 +432,7 @@ public class LibraryScreen extends Screen {
             return true;
         }
         if (preview.contains(mouseX, mouseY)) {
-            preview.zoomBy(scrollY);
+            preview.zoomAt(scrollY, mouseX, mouseY);
             lastInteraction = Util.getMillis();
             return true;
         }

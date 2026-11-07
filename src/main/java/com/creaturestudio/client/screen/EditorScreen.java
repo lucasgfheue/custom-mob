@@ -1,12 +1,15 @@
 package com.creaturestudio.client.screen;
 
 import com.creaturestudio.CreatureStudio;
+import com.creaturestudio.client.ClientFiles;
+import com.creaturestudio.client.EditorSettings;
 import com.creaturestudio.client.VanillaModels;
 import com.creaturestudio.client.render.AnimState;
 import com.creaturestudio.client.render.CreatureModelRenderer;
 import com.creaturestudio.client.render.PaintAtlas;
 import com.creaturestudio.client.render.Materials;
 import com.creaturestudio.data.Behavior;
+import com.creaturestudio.data.BodyParts;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureJson;
 import com.creaturestudio.data.CreaturePart;
@@ -18,6 +21,7 @@ import com.creaturestudio.data.Movement;
 import com.creaturestudio.data.PartAnim;
 import com.creaturestudio.data.PoseSolver;
 import com.creaturestudio.data.RangedType;
+import com.creaturestudio.data.SkinLayout;
 import com.creaturestudio.data.SoundPreset;
 import com.creaturestudio.data.SpawnTime;
 import com.creaturestudio.data.Templates;
@@ -46,6 +50,8 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.lwjgl.glfw.GLFW;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -60,16 +66,17 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
- * Editor de criaturas organizado en una fila de pestanas:
- * Plantilla, Piezas, Forma, Pintar, Animar, Atributos, Conducta y Aparicion.
- * A la izquierda siempre esta la vista 3D y a la derecha el contenido de la pestana activa
- * (con barra de desplazamiento). No hay ventanas emergentes: el color y las texturas se eligen
- * dentro de su pestana y las listas largas se abren como desplegables.
+ * Editor de criaturas. La vista 3D ocupa casi toda la pantalla (como en un programa de CAD) y a la derecha
+ * hay un panel con una fila de pestanas con iconos: Plantillas, Cuerpo, Piezas, Forma, Pintar, Animar,
+ * Atributos, Conducta y Aparicion. El panel se puede plegar (tecla H) y su ancho se cambia arrastrando el
+ * borde. En el modo facil solo se ven Cuerpo, Plantillas y Pintar. No hay ventanas emergentes: el color y las
+ * texturas se eligen dentro de su pestana y las listas largas se abren como desplegables.
  */
 public class EditorScreen extends Screen {
 
-    /** Pestanas del editor, en el orden en que se muestran (teclas 1 a 8). */
+    /** Pestanas del editor (el orden en pantalla esta en EASY_TABS y FULL_TABS). */
     private enum Tab {
+        EASY("easy"),
         TEMPLATE("template"),
         PARTS("parts"),
         SHAPE("shape"),
@@ -89,7 +96,7 @@ public class EditorScreen extends Screen {
 
         /** Pestanas que trabajan sobre la pieza seleccionada. */
         boolean usesPart() {
-            return this == PARTS || this == SHAPE || this == PAINT || this == ANIMATE;
+            return this == EASY || this == PARTS || this == SHAPE || this == PAINT || this == ANIMATE;
         }
 
         MutableComponent title() {
@@ -103,6 +110,7 @@ public class EditorScreen extends Screen {
         ItemStack icon() {
             if (icon == null) {
                 icon = new ItemStack(switch (this) {
+                    case EASY -> Items.ARMOR_STAND;
                     case TEMPLATE -> Items.BOOK;
                     case PARTS -> Items.CRAFTING_TABLE;
                     case SHAPE -> Items.SCAFFOLDING;
@@ -145,6 +153,10 @@ public class EditorScreen extends Screen {
     }
 
     private static final Tab[] TABS = Tab.values();
+    /** Pestanas que se ven en el modo facil y en el completo, en orden (teclas 1, 2, 3...). */
+    private static final Tab[] EASY_TABS = {Tab.EASY, Tab.TEMPLATE, Tab.PAINT};
+    private static final Tab[] FULL_TABS = {Tab.TEMPLATE, Tab.EASY, Tab.PARTS, Tab.SHAPE, Tab.PAINT, Tab.ANIMATE,
+            Tab.STATS, Tab.BEHAVIOR, Tab.SPAWN};
     private static final Tool[] SHAPE_TOOLS = {Tool.MOVE, Tool.RESIZE};
     private static final Tool[] PAINT_TOOLS = {Tool.BRUSH, Tool.ERASER, Tool.PICKER};
     private static final Integer[] BRUSH_SIZES = {1, 2, 3, 4, 6, 8};
@@ -152,9 +164,17 @@ public class EditorScreen extends Screen {
     /** Eje (0=X, 1=Y, 2=Z) y sentido de cada cara de {@link PaintLayout}. */
     private static final int[] FACE_AXIS = {2, 2, 0, 0, 1, 1};
     private static final int[] FACE_SIGN = {-1, 1, 1, -1, 1, -1};
-    private static final int HEADER_H = 22;
-    private static final int TAB_H = 30;
-    private static final int TOP = HEADER_H + TAB_H;
+    private static final int HEADER_H = 20;
+    /** Fila de iconos de las pestanas, encima del panel. */
+    private static final int TAB_H = 20;
+    /** Titulo de la pestana, debajo de los iconos. */
+    private static final int TITLE_H = 14;
+    /** Panel plegado: ancho de la columna de iconos y alto de cada icono. */
+    private static final int STRIP_W = 22;
+    private static final int STRIP_CELL = 20;
+    /** Boton de plegar el panel, a la izquierda de la fila de pestanas. */
+    private static final int FOLD_W = 12;
+    private static final int MIN_PANEL = 160;
     private static final int PAD = 6;
     private static final int SCROLLBAR = 4;
     private static final int ROW = 18;
@@ -164,6 +184,10 @@ public class EditorScreen extends Screen {
     private static final int GAP = 3;
     private static final int CELL = 18;
     private static final int CARD_H = 24;
+    /** Alto de los botones de las partes del cuerpo (modo facil). */
+    private static final int BODY_CELL_H = 20;
+    /** Texturas que se ensenan en el modo facil (las primeras de la lista: las de criatura). */
+    private static final int EASY_TEXTURES = 16;
     private static final int HINT = 0xFF7D8491;
     private static final int WARN = 0xFFE0B050;
     private static final int UNSAVED = 0xFFFFA040;
@@ -226,18 +250,12 @@ public class EditorScreen extends Screen {
     private int nameLabelX;
     private int unsavedX;
     private int headerRight;
-    private int previewButtonX;
-    private int previewButtonY;
     @Nullable
     private Button saveButton;
     @Nullable
     private Button undoButton;
     @Nullable
     private Button redoButton;
-    @Nullable
-    private Button animateButton;
-    @Nullable
-    private Button walkButton;
     private final List<NumberField> numberFields = new ArrayList<>();
     private final List<Runnable> refreshers = new ArrayList<>();
     private final List<PanelWidget> panelWidgets = new ArrayList<>();
@@ -256,8 +274,6 @@ public class EditorScreen extends Screen {
     private Tool tool = Tool.MOVE;
     private int brushSize = 1;
     private int brushColor = 0xFFE53935;
-    @Nullable
-    private Button mouseButton;
     private final List<ViewChip> viewChips = new ArrayList<>();
     /** Asa que se esta arrastrando: 0-2 flecha X/Y/Z, 3 = la pieza entera, 10-15 = cara (10 + cara). */
     private int gizmoHandle = -1;
@@ -286,6 +302,23 @@ public class EditorScreen extends Screen {
     @Nullable
     private CreatureDefinition previewPaintDef;
     private boolean previewPaintShown;
+
+    // Panel y modo facil
+    private boolean easyMode;
+    private boolean panelCollapsed;
+    private boolean resizingPanel;
+    private int resizeX;
+    /** Color de las partes del cuerpo nuevas (modo facil). */
+    private int easyColor = 0x8BC34A;
+    /** Modo facil: los cambios se aplican tambien a la pieza del otro lado. */
+    private boolean symmetry = true;
+    /** Ayuda de la parte de abajo de la vista (una linea; si no cabe, entera en el tooltip). */
+    @Nullable
+    private Component helpText;
+    private boolean helpCut;
+    private int helpX;
+    private int helpY;
+    private int helpW;
 
     // Modelos de Minecraft
     @Nullable
@@ -323,7 +356,10 @@ public class EditorScreen extends Screen {
         this.selected = def.parts.isEmpty() ? -1 : 0;
         this.committed = CreatureJson.write(def, false);
         this.dirty = isNew;
-        this.tab = showTemplates ? Tab.TEMPLATE : Tab.PARTS;
+        EditorSettings.load();
+        this.easyMode = EditorSettings.easyMode;
+        this.panelCollapsed = EditorSettings.panelCollapsed;
+        this.tab = showTemplates ? Tab.TEMPLATE : easyMode ? Tab.EASY : Tab.PARTS;
     }
 
     // =======================================================================================
@@ -340,25 +376,29 @@ public class EditorScreen extends Screen {
         templateGrid = null;
         partsList = null;
         vanillaList = null;
-        mouseButton = null;
         dropdown = null;
         draggingScrollbar = false;
+        resizingPanel = false;
         saveButton = null;
         undoButton = null;
         redoButton = null;
-        animateButton = null;
-        walkButton = null;
 
-        panelW = Mth.clamp(width * 2 / 5, 190, 260);
-        if (width - panelW < 170) {
-            panelW = Math.max(150, width - 170);
+        Tab[] visible = visibleTabs();
+        if (indexOf(visible, tab) < 0) {
+            tab = visible[0];
+        }
+        if (panelCollapsed) {
+            panelW = STRIP_W;
+        } else {
+            int auto = Mth.clamp(width * 3 / 10, 180, 240);
+            panelW = Mth.clamp(EditorSettings.panelWidth > 0 ? EditorSettings.panelWidth : auto, MIN_PANEL, maxPanel());
         }
         panelX = width - panelW;
         contentW = panelW - PAD * 2 - SCROLLBAR;
-        viewTop = TOP;
+        viewTop = HEADER_H + TAB_H + TITLE_H;
         viewBottom = height;
-        preview.setArea(0, TOP, panelX, height - TOP);
-        templatePreview.setArea(0, TOP, panelX, height - TOP);
+        preview.setArea(0, HEADER_H, panelX, height - HEADER_H);
+        templatePreview.setArea(0, HEADER_H, panelX, height - HEADER_H);
         fittedTemplate = -1;
         if (!viewFitted) {
             preview.fit(def);
@@ -372,9 +412,14 @@ public class EditorScreen extends Screen {
         }
 
         buildHeader();
-        buildPreviewButtons();
-        int y = 6;
+        buildViewBar();
+        if (panelCollapsed) {
+            contentHeight = 0;
+            return;
+        }
+        int y = 4;
         int bottom = switch (tab) {
+            case EASY -> buildEasyTab(y);
             case TEMPLATE -> buildTemplateTab(y);
             case PARTS -> buildPartsTab(y);
             case SHAPE -> buildShapeTab(y);
@@ -395,25 +440,36 @@ public class EditorScreen extends Screen {
     private void buildHeader() {
         Component exitText = Ui.tr("editor.exit");
         Component saveText = Ui.tr("editor.save");
+        int bh = HEADER_H - 4;
         int wExit = Math.max(40, font.width(exitText) + 12);
         int wSave = Math.max(50, font.width(saveText) + 16);
-        int x = width - 4 - wExit;
-        addRenderableWidget(Button.builder(exitText, b -> onClose()).bounds(x, 3, wExit, FIELD_H).build());
+        int x = width - 3 - wExit;
+        addRenderableWidget(Button.builder(exitText, b -> onClose()).bounds(x, 2, wExit, bh).build());
         x -= wSave + 3;
-        saveButton = addRenderableWidget(Button.builder(saveText, b -> save()).bounds(x, 3, wSave, FIELD_H)
+        saveButton = addRenderableWidget(Button.builder(saveText, b -> save()).bounds(x, 2, wSave, bh)
                 .tooltip(Tooltip.create(Ui.tr("editor.save_tooltip"))).build());
-        x -= 20 + 10;
+        x -= 20 + 8;
         redoButton = addRenderableWidget(Button.builder(Component.literal("\u21B7"), b -> redo())
-                .bounds(x, 3, 20, FIELD_H).tooltip(Tooltip.create(Ui.tr("editor.redo"))).build());
+                .bounds(x, 2, 20, bh).tooltip(Tooltip.create(Ui.tr("editor.redo"))).build());
         x -= 20 + 2;
         undoButton = addRenderableWidget(Button.builder(Component.literal("\u21B6"), b -> undo())
-                .bounds(x, 3, 20, FIELD_H).tooltip(Tooltip.create(Ui.tr("editor.undo"))).build());
-        headerRight = x;
+                .bounds(x, 2, 20, bh).tooltip(Tooltip.create(Ui.tr("editor.undo"))).build());
 
         nameLabelX = 6;
         int nx = nameLabelX + font.width(Ui.tr("editor.name_label")) + 4;
-        int nameW = Mth.clamp(headerRight - 12 - nx, 60, 150);
-        EditBox nameBox = new EditBox(font, nx, 3, nameW, FIELD_H, Ui.tr("editor.name"));
+        // Boton del modo facil (con un texto mas corto si no cabe)
+        Component easyText = Ui.onOff("editor.easy", easyMode);
+        if (x - 8 - (font.width(easyText) + 12) - nx < 90) {
+            easyText = Ui.onOff("editor.easy_short", easyMode);
+        }
+        int wEasy = font.width(easyText) + 12;
+        x -= wEasy + 8;
+        addRenderableWidget(Button.builder(easyText, b -> setEasyMode(!easyMode)).bounds(x, 2, wEasy, bh)
+                .tooltip(Tooltip.create(Ui.tr("editor.easy_tooltip"))).build());
+        headerRight = x;
+
+        int nameW = Mth.clamp(headerRight - 12 - nx, 50, 150);
+        EditBox nameBox = new EditBox(font, nx, 2, nameW, bh, Ui.tr("editor.name"));
         nameBox.setMaxLength(CreatureDefinition.NAME_MAX);
         nameBox.setValue(def.name);
         nameBox.setHint(Ui.tr("editor.name_hint").withStyle(ChatFormatting.DARK_GRAY));
@@ -426,38 +482,40 @@ public class EditorScreen extends Screen {
         unsavedX = nx + nameW + 8;
     }
 
-    private void buildPreviewButtons() {
-        previewButtonX = preview.x + 4;
-        previewButtonY = preview.y + 4;
-        animateButton = previewButton(Ui.onOff("editor.preview.animate", animate), b -> setAnimate(!animate));
-        walkButton = previewButton(Ui.onOff("editor.preview.walk", walk), b -> setWalk(!walk));
-        previewButton(Ui.tr("editor.preview.attack"), b -> attackStart = Util.getMillis());
-        previewButton(Ui.tr("editor.preview.reset"), b -> preview.fit(def));
-        mouseButton = previewButton(Ui.onOff("editor.preview.mouse", mouseMode), b -> setMouseMode(!mouseMode));
-        mouseButton.setTooltip(Tooltip.create(Ui.tr("editor.preview.mouse_tooltip")));
-        buildToolChips();
-    }
-
-    /** Herramientas del raton, debajo de los botones de la vista 3D. */
-    private void buildToolChips() {
+    /** Barra de la vista 3D: opciones de la vista y, con el raton activado, sus herramientas. */
+    private void buildViewBar() {
         viewChips.clear();
+        int left = preview.x + 4;
+        int maxX = preview.x + preview.w - 4;
+        int[] pos = {left, preview.y + 4};
+        viewChip(pos, left, maxX, Ui.onOff("editor.preview.animate", animate), () -> animate,
+                () -> setAnimate(!animate), Ui.tr("editor.preview.animate_tip"), false);
+        viewChip(pos, left, maxX, Ui.onOff("editor.preview.walk", walk), () -> walk,
+                () -> setWalk(!walk), Ui.tr("editor.preview.walk_tip"), false);
+        viewChip(pos, left, maxX, Ui.tr("editor.preview.attack"), () -> false,
+                () -> attackStart = Util.getMillis(), Ui.tr("editor.preview.attack_tip"), false);
+        viewChip(pos, left, maxX, Ui.tr("editor.preview.reset"), () -> false,
+                () -> preview.fit(def), Ui.tr("editor.preview.reset_tip"), false);
+        viewChip(pos, left, maxX, Ui.onOff("editor.preview.mouse", mouseMode), () -> mouseMode,
+                () -> setMouseMode(!mouseMode), Ui.tr("editor.preview.mouse_tooltip"), false);
         if (!mouseMode) {
             return;
         }
-        int left = preview.x + 4;
-        int maxX = preview.x + preview.w - 4;
-        int[] pos = {left, previewButtonY + 17};
+        pos[0] = left;
+        pos[1] += 15;
         for (Tool t : Tool.values()) {
             viewChip(pos, left, maxX, t.title(), () -> tool == t, () -> setTool(t), t.help(), false);
         }
         if (tool == Tool.BRUSH || tool == Tool.ERASER) {
-            pos[0] = left;
-            pos[1] += 15;
+            pos[0] += 6;
             viewChip(pos, left, maxX, Component.literal("-"), () -> false, () -> changeBrush(-1), Ui.tr("tool.size_down"), false);
             viewChip(pos, left, maxX, Ui.tr("tool.size", brushSize), () -> false, null, null, false);
             viewChip(pos, left, maxX, Component.literal("+"), () -> false, () -> changeBrush(1), Ui.tr("tool.size_up"), false);
             if (tool == Tool.BRUSH) {
-                viewChip(pos, left, maxX, Component.literal("    "), () -> false, () -> switchTab(Tab.PAINT),
+                viewChip(pos, left, maxX, Component.literal("    "), () -> false, () -> {
+                            setPanelCollapsed(false);
+                            switchTab(Tab.PAINT);
+                        },
                         Ui.tr("tool.color_tip"), true);
             }
         }
@@ -477,9 +535,6 @@ public class EditorScreen extends Screen {
     private void setMouseMode(boolean on) {
         endMouseAction();
         mouseMode = on;
-        if (mouseButton != null) {
-            mouseButton.setMessage(Ui.onOff("editor.preview.mouse", on));
-        }
         requestRebuild();
     }
 
@@ -498,39 +553,156 @@ public class EditorScreen extends Screen {
             }
         }
         brushSize = BRUSH_SIZES[Mth.clamp(i + direction, 0, BRUSH_SIZES.length - 1)];
-        buildToolChips();
-    }
-
-    private Button previewButton(Component text, Button.OnPress onPress) {
-        int bw = font.width(text) + 10;
-        int maxX = preview.x + preview.w - 4;
-        if (previewButtonX + bw > maxX && previewButtonX > preview.x + 4) {
-            previewButtonX = preview.x + 4;
-            previewButtonY += 16;
-        }
-        Button b = addRenderableWidget(Button.builder(text, onPress).bounds(previewButtonX, previewButtonY, bw, 14).build());
-        previewButtonX += bw + 2;
-        return b;
+        buildViewBar();
     }
 
     private void setAnimate(boolean value) {
         animate = value;
-        if (animateButton != null) {
-            animateButton.setMessage(Ui.onOff("editor.preview.animate", value));
-        }
+        buildViewBar();
     }
 
     private void setWalk(boolean value) {
         walk = value;
-        if (walkButton != null) {
-            walkButton.setMessage(Ui.onOff("editor.preview.walk", value));
+        buildViewBar();
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Pestanas visibles, panel plegable y modo facil
+    // ---------------------------------------------------------------------------------------
+
+    private Tab[] visibleTabs() {
+        return easyMode ? EASY_TABS : FULL_TABS;
+    }
+
+    private static int indexOf(Tab[] tabs, Tab t) {
+        for (int i = 0; i < tabs.length; i++) {
+            if (tabs[i] == t) {
+                return i;
+            }
         }
+        return -1;
+    }
+
+    private int maxPanel() {
+        return Math.max(MIN_PANEL, Math.min(340, width - 200));
+    }
+
+    private void setPanelCollapsed(boolean collapsed) {
+        if (panelCollapsed == collapsed) {
+            return;
+        }
+        panelCollapsed = collapsed;
+        EditorSettings.panelCollapsed = collapsed;
+        EditorSettings.save();
+        dropdown = null;
+        activeElement = null;
+        setFocused(null);
+        requestRebuild();
+    }
+
+    private void setEasyMode(boolean on) {
+        easyMode = on;
+        EditorSettings.easyMode = on;
+        if (on && tab != Tab.TEMPLATE) {
+            tab = Tab.EASY;
+        }
+        if (panelCollapsed) {
+            panelCollapsed = false;
+            EditorSettings.panelCollapsed = false;
+        }
+        EditorSettings.save();
+        dropdown = null;
+        activeElement = null;
+        setFocused(null);
+        requestRebuild();
+        showNotice(Ui.tr(on ? "editor.easy_on" : "editor.easy_off"), true);
+    }
+
+    /** El raton esta sobre el borde del panel (se arrastra para cambiar su ancho). */
+    private boolean dividerHit(double mx, double my) {
+        return !panelCollapsed && my >= HEADER_H && mx >= panelX - 2 && mx <= panelX + 2;
     }
 
     // ---------------------------------------------------------------------------------------
     // Contenido de cada pestana (coordenadas del contenido: x desde el borde izquierdo del panel,
     // y desde arriba del contenido sin desplazar)
     // ---------------------------------------------------------------------------------------
+
+    private int buildEasyTab(int y) {
+        y = intro(y);
+        y = section(y, Ui.tr("easy.add"));
+        BodyGrid grid = add(new BodyGrid(0, y, contentW));
+        y += grid.h + 6;
+        y = smallLabel(y, Ui.tr("easy.new_color"));
+        Palette newColor = add(new Palette(0, y, contentW, () -> easyColor, c -> easyColor = c & 0xFFFFFF));
+        y += newColor.h + 8;
+
+        CreaturePart p = sel();
+        if (p == null) {
+            return text(y, Ui.tr("easy.empty"), HINT);
+        }
+        y = section(y, Ui.tr("easy.selected"));
+        y = pieceSelector(y);
+        add(new Toggle(0, y, contentW, Ui.tr("easy.symmetry"), () -> symmetry, v -> symmetry = v,
+                Ui.tr("easy.symmetry_tip"), false));
+        y += CHIP_H + 4;
+
+        int half = (contentW - GAP) / 2;
+        int third = (contentW - GAP * 2) / 3;
+        int lastX = (third + GAP) * 2;
+        int lastW = contentW - lastX;
+        y = smallLabel(y, Ui.tr("easy.size"));
+        button(0, y, half, Ui.tr("easy.bigger"), b -> easyScale(1.2f, 1.2f, 1.2f), Ui.tr("easy.bigger_tip"));
+        button(half + GAP, y, contentW - half - GAP, Ui.tr("easy.smaller"), b -> easyScale(1f / 1.2f, 1f / 1.2f, 1f / 1.2f),
+                Ui.tr("easy.smaller_tip"));
+        y += ROW;
+        button(0, y, third, Ui.tr("easy.wider"), b -> easyScale(1.25f, 1f, 1f), Ui.tr("easy.wider_tip"));
+        button(third + GAP, y, third, Ui.tr("easy.taller"), b -> easyScale(1f, 1.25f, 1f), Ui.tr("easy.taller_tip"));
+        button(lastX, y, lastW, Ui.tr("easy.longer"), b -> easyScale(1f, 1f, 1.25f), Ui.tr("easy.longer_tip"));
+        y += ROW;
+        button(0, y, third, Ui.tr("easy.narrower"), b -> easyScale(0.8f, 1f, 1f), Ui.tr("easy.narrower_tip"));
+        button(third + GAP, y, third, Ui.tr("easy.lower"), b -> easyScale(1f, 0.8f, 1f), Ui.tr("easy.lower_tip"));
+        button(lastX, y, lastW, Ui.tr("easy.shorter"), b -> easyScale(1f, 1f, 0.8f), Ui.tr("easy.shorter_tip"));
+        y += ROW + 4;
+
+        boolean paired = BodyParts.partner(def, selected) >= 0;
+        float outward = p.x + p.w / 2f >= 0f ? 1f : -1f;
+        y = smallLabel(y, Ui.tr("easy.move"));
+        button(0, y, third, Ui.tr("easy.up"), b -> easyMove(0f, 1f, 0f), Ui.tr("easy.step_tip"));
+        button(third + GAP, y, third, Ui.tr("easy.down"), b -> easyMove(0f, -1f, 0f), Ui.tr("easy.step_tip"));
+        button(lastX, y, lastW, Ui.tr("easy.forward"), b -> easyMove(0f, 0f, -1f), Ui.tr("easy.forward_tip"));
+        y += ROW;
+        if (paired) {
+            button(0, y, third, Ui.tr("easy.apart"), b -> easyMove(outward, 0f, 0f), Ui.tr("easy.apart_tip"));
+            button(third + GAP, y, third, Ui.tr("easy.together"), b -> easyMove(-outward, 0f, 0f), Ui.tr("easy.together_tip"));
+        } else {
+            button(0, y, third, Ui.tr("easy.left"), b -> easyMove(1f, 0f, 0f), Ui.tr("easy.left_tip"));
+            button(third + GAP, y, third, Ui.tr("easy.right"), b -> easyMove(-1f, 0f, 0f), Ui.tr("easy.right_tip"));
+        }
+        button(lastX, y, lastW, Ui.tr("easy.back"), b -> easyMove(0f, 0f, 1f), Ui.tr("easy.back_tip"));
+        y += ROW + 4;
+
+        y = smallLabel(y, Ui.tr("easy.color"));
+        Palette colors = add(new Palette(0, y, contentW, () -> p.color, this::easyColor));
+        y += colors.h + 6;
+        if (p.hasPaint()) {
+            // Las piezas de los modelos de Minecraft (o con skin) llevan la textura pintada encima del color.
+            y = text(y, Ui.tr("easy.painted"), WARN) + 3;
+            button(0, y, contentW, Ui.tr("easy.clear_paint"), b -> easyClearPaint(), Ui.tr("easy.clear_paint_tip"));
+            y += ROW + 4;
+        }
+        y = smallLabel(y, Ui.tr("easy.texture"));
+        // en el modo facil solo las texturas de criatura (piel, escamas, plumas, ojos...)
+        TextureGrid textures = add(new TextureGrid(0, y, contentW, p, this::easyMaterial, EASY_TEXTURES));
+        y += textures.h + 6;
+
+        boolean offCenter = Math.abs(p.x + p.w / 2f) > 0.5f;
+        button(0, y, half, Ui.tr("easy.mirror"), b -> duplicateSelected(true), Ui.tr("easy.mirror_tip")).active =
+                offCenter && !paired;
+        button(half + GAP, y, contentW - half - GAP, Ui.tr("easy.delete"), b -> easyDelete(), Ui.tr("easy.delete_tip"));
+        y += ROW + 6;
+        return text(y, Ui.tr("easy.hint"), HINT);
+    }
 
     private int buildTemplateTab(int y) {
         y = intro(y);
@@ -641,12 +813,25 @@ public class EditorScreen extends Screen {
         }
         y = pieceSelector(y);
 
+        y = section(y, Ui.tr("skin.section"));
+        int halfS = (contentW - GAP) / 2;
+        button(0, y, halfS, Ui.tr("skin.import"), b -> openSkinPicker(), Ui.tr("skin.import_tip"));
+        button(halfS + GAP, y, contentW - halfS - GAP, Ui.tr("skin.export"), b -> exportSkin(), Ui.tr("skin.export_tip"));
+        y += ROW;
+        button(0, y, contentW, Ui.tr("library.folder"), b -> ClientFiles.openFolder(), Ui.tr("skin.folder_tip"));
+        y += ROW;
+        int mapped = SkinLayout.mapped(def);
+        Component skinInfo = mapped > 0
+                ? Ui.tr("skin.status", def.texW, def.texH, mapped, mapped + SkinLayout.unmapped(def))
+                : Ui.tr("skin.none");
+        y = text(y, skinInfo, HINT) + 8;
+
         y = section(y, Ui.tr("paint.brush_section"));
         y = mouseHelper(y, PAINT_TOOLS, "paint.mouse_off");
         y = smallLabel(y, Ui.tr("paint.size"));
         y = chips(y, BRUSH_SIZES, BRUSH_SIZES.length, () -> brushSize, v -> {
             brushSize = v;
-            buildToolChips();
+            buildViewBar();
         }, v -> Component.literal(String.valueOf(v)), null) + 6;
         y = smallLabel(y, Ui.tr("paint.brush_color"));
         IntSupplier brush = () -> brushColor & 0xFFFFFF;
@@ -915,7 +1100,13 @@ public class EditorScreen extends Screen {
 
     private int noParts(int y) {
         y = text(y, Ui.tr("editor.no_parts_here"), Ui.TEXT) + 6;
-        button(0, y, Math.min(contentW, 120), Ui.tr("editor.go_parts"), b -> switchTab(Tab.PARTS), null);
+        int half = (contentW - GAP) / 2;
+        // en el modo facil no esta la pestana Piezas: se ofrece la de Cuerpo
+        if (!easyMode) {
+            button(0, y, half, Ui.tr("editor.go_parts"), b -> switchTab(Tab.PARTS), null);
+        }
+        button(easyMode ? 0 : half + GAP, y, easyMode ? contentW : contentW - half - GAP, Ui.tr("editor.go_body"),
+                b -> switchTab(Tab.EASY), null);
         return y + ROW;
     }
 
@@ -1133,7 +1324,7 @@ public class EditorScreen extends Screen {
     }
 
     private boolean inPanelView(double mx, double my) {
-        return mx >= panelX && mx < width && my >= viewTop && my < viewBottom;
+        return !panelCollapsed && mx >= panelX && mx < width && my >= viewTop && my < viewBottom;
     }
 
     private int trackX() {
@@ -1308,7 +1499,12 @@ public class EditorScreen extends Screen {
     }
 
     private void nudgeSelected(float dx, float dy, float dz) {
+        // en la pestana Cuerpo la pieza del otro lado se mueve reflejada (simetria)
+        int other = tab == Tab.EASY ? mirrorPartner() : -1;
         moveSubtree(selected, dx, dy, dz);
+        if (other >= 0) {
+            moveSubtree(other, -dx, dy, dz);
+        }
         markChanged();
     }
 
@@ -1360,6 +1556,8 @@ public class EditorScreen extends Screen {
             parts.add(p.copy());
         }
         def.parts = parts;
+        def.texW = src.texW;
+        def.texH = src.texH;
         if (isNew && !nameEdited) {
             def.name = CreatureDefinition.cleanText(entry.name().getString(), CreatureDefinition.NAME_MAX);
         }
@@ -1369,6 +1567,203 @@ public class EditorScreen extends Screen {
         markChanged();
         requestRebuild();
         showNotice(Ui.tr("vanilla.imported", entry.name()), true);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Modo facil
+    // ---------------------------------------------------------------------------------------
+
+    private void addBodyPart(BodyParts.Kind kind) {
+        boolean wasEmpty = def.parts.isEmpty();
+        BodyParts.Result r = BodyParts.add(def, kind, easyColor);
+        Component name = Ui.tr("easy.part." + kind.key);
+        if (r == null) {
+            showNotice(Ui.tr("editor.too_many_parts", CreatureDefinition.MAX_PARTS), false);
+            return;
+        }
+        if (r.index() >= 0 && r.index() < def.parts.size()) {
+            selected = r.index();
+            ensureVisible(selected);
+        }
+        if (r.created()) {
+            if (wasEmpty) {
+                preview.fit(def);
+            }
+            markChanged();
+            showNotice(Ui.tr("easy.added", name), true);
+        } else {
+            showNotice(Ui.tr("easy.exists", name), true);
+        }
+        requestRebuild();
+    }
+
+    /** La pieza del otro lado de la elegida (si la simetria esta activada y no cuelga una de la otra), o -1. */
+    private int mirrorPartner() {
+        if (!symmetry) {
+            return -1;
+        }
+        int other = BodyParts.partner(def, selected);
+        if (other < 0 || PoseSolver.isDescendant(def.parts, other, selected)
+                || PoseSolver.isDescendant(def.parts, selected, other)) {
+            return -1;
+        }
+        return other;
+    }
+
+    /** Agranda o achica la pieza elegida con todo lo que cuelga de ella (y la del otro lado). */
+    private void easyScale(float sx, float sy, float sz) {
+        if (sel() == null) {
+            return;
+        }
+        int other = mirrorPartner();
+        float low = BodyParts.lowest(def);
+        BodyParts.scaleGroup(def, selected, sx, sy, sz);
+        if (other >= 0) {
+            BodyParts.scaleGroup(def, other, sx, sy, sz);
+        }
+        BodyParts.ground(def, low);
+        markChanged();
+    }
+
+    /** Mueve la pieza elegida 1 pixel (0,25 con Mayus); la del otro lado se mueve reflejada. */
+    private void easyMove(float dx, float dy, float dz) {
+        if (sel() == null) {
+            return;
+        }
+        float step = hasShiftDown() ? 0.25f : 1f;
+        int other = mirrorPartner();
+        moveSubtree(selected, dx * step, dy * step, dz * step);
+        if (other >= 0) {
+            moveSubtree(other, -dx * step, dy * step, dz * step);
+        }
+        markChanged();
+    }
+
+    private void easyColor(int rgb) {
+        CreaturePart p = sel();
+        if (p == null) {
+            return;
+        }
+        recolor(p, rgb);
+        int other = symmetry ? BodyParts.partner(def, selected) : -1;
+        if (other >= 0) {
+            recolor(def.parts.get(other), rgb);
+        }
+        markChanged();
+    }
+
+    /** Cambia el color; una pieza invisible sin pintura pasa a verse lisa (si no, el color no se notaria). */
+    private static void recolor(CreaturePart p, int rgb) {
+        p.color = rgb & 0xFFFFFF;
+        if (MaterialIds.CLEAR.equals(p.material) && !p.hasPaint() && p.w > 0f && p.h > 0f && p.d > 0f) {
+            p.material = MaterialIds.SMOOTH;
+        }
+    }
+
+    /** Quita la pintura (o skin) de la pieza para que se vean su color y su textura. */
+    private void easyClearPaint() {
+        CreaturePart p = sel();
+        if (p == null) {
+            return;
+        }
+        unpaint(p);
+        int other = symmetry ? BodyParts.partner(def, selected) : -1;
+        if (other >= 0) {
+            unpaint(def.parts.get(other));
+        }
+        markChanged();
+        requestRebuild();
+    }
+
+    private static void unpaint(CreaturePart p) {
+        boolean wasPainted = p.hasPaint();
+        p.clearPaint();
+        if (wasPainted && MaterialIds.CLEAR.equals(p.material)) {
+            p.material = MaterialIds.SMOOTH;
+        }
+    }
+
+    private void easyMaterial(String material) {
+        CreaturePart p = sel();
+        if (p == null) {
+            return;
+        }
+        p.material = material;
+        int other = symmetry ? BodyParts.partner(def, selected) : -1;
+        if (other >= 0) {
+            def.parts.get(other).material = material;
+        }
+        markChanged();
+    }
+
+    /** Borra la pieza elegida (y la del otro lado si la simetria esta activada). */
+    private void easyDelete() {
+        int other = symmetry ? BodyParts.partner(def, selected) : -1;
+        if (other >= 0 && other != selected) {
+            int first = Math.max(selected, other);
+            int second = Math.min(selected, other);
+            selected = first;
+            deleteSelected();
+            selected = second;
+            deleteSelected();
+        } else {
+            deleteSelected();
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Skins (PNG)
+    // ---------------------------------------------------------------------------------------
+
+    private void openSkinPicker() {
+        minecraft.setScreen(new SkinPickScreen(this, def.texW, def.texH, this::applySkin));
+    }
+
+    /** Pone la imagen elegida como skin de la criatura. */
+    private void applySkin(String fileName, ClientFiles.Image image) {
+        boolean laidOut = false;
+        if (SkinLayout.mapped(def) == 0) {
+            // La criatura no viene de un modelo de Minecraft: se usa el reparto de su propia plantilla
+            // (el mismo que al exportar la skin).
+            SkinLayout.autoLayout(def);
+            laidOut = true;
+        }
+        int painted = SkinLayout.apply(def, image.argb(), image.width(), image.height());
+        if (painted == 0) {
+            showNotice(Ui.tr("skin.no_parts"), false);
+            requestRebuild();
+            return;
+        }
+        markChanged();
+        requestRebuild();
+        int left = SkinLayout.unmapped(def);
+        if (laidOut) {
+            showNotice(Ui.tr("skin.applied_layout", fileName), true);
+        } else if (left > 0) {
+            showNotice(Ui.tr("skin.applied_some", fileName, left), true);
+        } else {
+            showNotice(Ui.tr("skin.applied", fileName), true);
+        }
+    }
+
+    /** Guarda la skin de la criatura como PNG (repartiendo antes las piezas que no tienen sitio). */
+    private void exportSkin() {
+        int placed = SkinLayout.autoLayout(def);
+        if (def.texW <= 0 || def.texH <= 0 || SkinLayout.mapped(def) == 0) {
+            showNotice(Ui.tr("skin.no_parts"), false);
+            return;
+        }
+        if (placed > 0) {
+            markChanged();
+        }
+        try {
+            String name = def.name.isBlank() ? def.id : def.name;
+            Path file = ClientFiles.writeSkin(name, SkinLayout.export(def), def.texW, def.texH);
+            showNotice(Ui.tr("skin.exported", file.getFileName().toString()), true);
+        } catch (IOException e) {
+            showNotice(Ui.tr("skin.failed_write"), false);
+        }
+        requestRebuild();
     }
 
     /** Filas de la lista de piezas en orden de arbol: {indice, profundidad}. */
@@ -1626,8 +2021,6 @@ public class EditorScreen extends Screen {
         g.fill(0, 0, width, height, Ui.BG);
         g.fill(0, 0, width, HEADER_H, Ui.PANEL_DARK);
         g.hLine(0, width, HEADER_H - 1, Ui.BORDER);
-        g.fill(0, HEADER_H, width, TOP, 0xFF17191E);
-        g.hLine(0, width, TOP - 1, Ui.BORDER);
         g.fillGradient(preview.x, preview.y, preview.x + preview.w, preview.y + preview.h,
                 Ui.PREVIEW_TOP, Ui.PREVIEW_BOTTOM);
         boolean showTemplate = hoveredTemplate >= 0;
@@ -1649,8 +2042,8 @@ public class EditorScreen extends Screen {
         if (editing && mouseMode) {
             renderMouseOverlay(g, mouseX, mouseY);
         }
-        g.fill(panelX, TOP, width, height, Ui.PANEL);
-        g.vLine(panelX, TOP - 1, height, Ui.BORDER);
+        g.fill(panelX, HEADER_H, width, height, panelCollapsed ? Ui.PANEL_DARK : Ui.PANEL);
+        g.vLine(panelX, HEADER_H - 1, height, Ui.BORDER);
     }
 
     @Override
@@ -1674,18 +2067,31 @@ public class EditorScreen extends Screen {
 
         renderHeader(g);
         renderTabs(g, mx, my);
-        renderPanel(g, mx, my, partialTick);
+        if (!panelCollapsed) {
+            renderPanel(g, mx, my, partialTick);
+        }
         renderPreviewOverlay(g);
+        if (resizingPanel) {
+            g.fill(resizeX - 1, HEADER_H, resizeX + 1, height, Ui.ACCENT);
+        } else if (dividerHit(mx, my) && !dragging && gizmoHandle < 0 && !painting) {
+            g.fill(panelX - 1, HEADER_H, panelX + 1, height, 0xFF8A93A6);
+        }
 
         if (dropdown != null) {
             g.pose().pushPose();
             g.pose().translate(0f, 0f, 400f);
             dropdown.render(g, mouseX, mouseY);
             g.pose().popPose();
-        } else if (activeElement == null && !dragging && !draggingScrollbar) {
+        } else if (activeElement == null && !dragging && !draggingScrollbar && !resizingPanel
+                && gizmoHandle < 0 && !painting) {
             renderTabTooltip(g, mx, my);
             renderElementTooltip(g, mx, my);
             renderViewChipTooltip(g, mx, my);
+            if (helpCut && helpText != null && Ui.inside(mx, my, helpX, helpY - 1, helpW, 10)) {
+                g.renderTooltip(font, font.split(helpText, 240), mx, my);
+            } else if (dividerHit(mx, my)) {
+                g.renderTooltip(font, tip(Ui.tr("editor.panel.resize")), mx, my);
+            }
         }
     }
 
@@ -1762,11 +2168,11 @@ public class EditorScreen extends Screen {
     }
 
     private void renderHeader(GuiGraphics g) {
-        g.drawString(font, Ui.tr("editor.name_label"), nameLabelX, 7, Ui.MUTED, false);
+        g.drawString(font, Ui.tr("editor.name_label"), nameLabelX, 6, Ui.MUTED, false);
         if (dirty) {
             Component unsaved = Ui.tr("editor.unsaved");
             if (unsavedX + font.width(unsaved) <= headerRight - 6) {
-                g.drawString(font, unsaved, unsavedX, 7, UNSAVED, false);
+                g.drawString(font, unsaved, unsavedX, 6, UNSAVED, false);
             }
             if (saveButton != null) {
                 int sx = saveButton.getX();
@@ -1776,44 +2182,97 @@ public class EditorScreen extends Screen {
         }
     }
 
-    private int tabW() {
-        return Math.max(1, (width - 4) / TABS.length);
+    private int stripLeft() {
+        return panelX + 1 + FOLD_W;
     }
 
-    private int tabX(int index) {
-        return 2 + index * tabW();
+    private int tabCellW() {
+        return Math.max(1, (width - stripLeft()) / visibleTabs().length);
     }
 
+    /**
+     * Que hay debajo del raton en la fila (o columna, con el panel plegado) de pestanas: el indice de la pestana
+     * en {@link #visibleTabs()}, -2 = boton de plegar/desplegar el panel, -1 = nada.
+     */
     private int tabAt(double mx, double my) {
-        if (my < HEADER_H || my >= TOP || mx < 2 || mx >= width - 2) {
+        Tab[] visible = visibleTabs();
+        if (mx < panelX || mx >= width || my < HEADER_H) {
             return -1;
         }
-        return Math.min(TABS.length - 1, (int) ((mx - 2) / tabW()));
+        if (panelCollapsed) {
+            int row = (int) ((my - HEADER_H) / STRIP_CELL);
+            if (row == 0) {
+                return -2;
+            }
+            return row - 1 < visible.length ? row - 1 : -1;
+        }
+        if (my >= HEADER_H + TAB_H) {
+            return -1;
+        }
+        if (mx < stripLeft()) {
+            return -2;
+        }
+        return Math.min(visible.length - 1, (int) ((mx - stripLeft()) / tabCellW()));
     }
 
     private void renderTabs(GuiGraphics g, int mx, int my) {
+        Tab[] visible = visibleTabs();
         int hovered = tabAt(mx, my);
-        for (int i = 0; i < TABS.length; i++) {
-            Tab t = TABS[i];
-            int x = tabX(i);
-            int w = i == TABS.length - 1 ? width - 2 - x : tabW();
-            int y = HEADER_H + 1;
-            boolean active = t == tab;
-            boolean hover = !active && hovered == i;
-            if (active) {
-                g.fill(x, y, x + w, TOP, Ui.PANEL);
-                g.fill(x, y, x + w, y + 2, Ui.ACCENT);
-                g.vLine(x, y, TOP, Ui.BORDER);
-                g.vLine(x + w - 1, y, TOP, Ui.BORDER);
-            } else if (hover) {
-                g.fill(x + 1, y + 1, x + w - 1, TOP - 1, 0xFF2A2E38);
+        if (panelCollapsed) {
+            int x = panelX + 1;
+            int w = width - x;
+            boolean hf = hovered == -2;
+            if (hf) {
+                g.fill(x, HEADER_H, width, HEADER_H + STRIP_CELL, 0xFF2A2E38);
             }
-            g.drawString(font, String.valueOf(i + 1), x + 3, y + 3, active ? 0xFF6C7488 : 0xFF4A505C, false);
-            g.renderItem(t.icon(), x + (w - 16) / 2, y + 3);
-            String label = font.plainSubstrByWidth(t.title().getString(), w - 4);
-            int color = active ? 0xFFFFFFFF : hover ? Ui.TEXT : Ui.MUTED;
-            g.drawString(font, label, x + (w - font.width(label)) / 2, y + 20, color, false);
+            g.drawCenteredString(font, "\u00AB", x + w / 2, HEADER_H + 6, hf ? 0xFFFFFFFF : Ui.MUTED);
+            for (int i = 0; i < visible.length; i++) {
+                int y = HEADER_H + (i + 1) * STRIP_CELL;
+                boolean active = visible[i] == tab;
+                if (active) {
+                    g.fill(x, y, width, y + STRIP_CELL, Ui.PANEL);
+                    g.fill(x, y, x + 2, y + STRIP_CELL, Ui.ACCENT);
+                } else if (hovered == i) {
+                    g.fill(x, y, width, y + STRIP_CELL, 0xFF2A2E38);
+                }
+                g.renderItem(visible[i].icon(), x + (w - 16) / 2, y + 2);
+            }
+            return;
         }
+        int top = HEADER_H;
+        g.fill(panelX + 1, top, width, top + TAB_H, 0xFF17191E);
+        boolean hf = hovered == -2;
+        if (hf) {
+            g.fill(panelX + 1, top, stripLeft(), top + TAB_H, 0xFF2A2E38);
+        }
+        g.drawString(font, "\u00BB", panelX + 4, top + 6, hf ? 0xFFFFFFFF : Ui.MUTED, false);
+        int cw = tabCellW();
+        for (int i = 0; i < visible.length; i++) {
+            Tab t = visible[i];
+            int x = stripLeft() + i * cw;
+            int w = i == visible.length - 1 ? width - x : cw;
+            boolean active = t == tab;
+            if (active) {
+                g.fill(x, top, x + w, top + TAB_H, Ui.PANEL);
+                g.fill(x, top, x + w, top + 2, Ui.ACCENT);
+            } else if (hovered == i) {
+                g.fill(x, top, x + w, top + TAB_H, 0xFF2A2E38);
+            }
+            g.renderItem(t.icon(), x + (w - 16) / 2, top + 2);
+        }
+        g.hLine(panelX + 1, width, top + TAB_H, Ui.BORDER);
+        // titulo de la pestana
+        int ty = top + TAB_H + 1;
+        g.fill(panelX + 1, ty, width, viewTop, Ui.PANEL);
+        String title = tab.title().getString();
+        int maxTitle = Math.max(10, panelW - PAD * 2);
+        Component bold = Component.literal(title).withStyle(ChatFormatting.BOLD);
+        while (title.length() > 1 && font.width(bold) > maxTitle) {
+            title = title.substring(0, title.length() - 1);
+            bold = Component.literal(title).withStyle(ChatFormatting.BOLD);
+        }
+        g.drawString(font, bold, panelX + PAD, ty + 3, 0xFFFFFFFF, false);
+        g.hLine(panelX + PAD, width - PAD, viewTop - 1, 0xFF30343E);
     }
 
     private void renderPanel(GuiGraphics g, int mx, int my, float partialTick) {
@@ -1844,13 +2303,19 @@ public class EditorScreen extends Screen {
     private void renderPreviewOverlay(GuiGraphics g) {
         Component help = mouseMode ? tool.help()
                 : Ui.tr(tab.usesPart() ? "editor.preview.help" : "editor.preview.help_behavior");
-        List<FormattedCharSequence> lines = font.split(help, Math.max(20, preview.w - 8));
-        int hy = preview.y + preview.h - 4 - lines.size() * 10;
-        int ly = hy;
-        for (FormattedCharSequence line : lines) {
-            g.drawString(font, line, preview.x + 4, ly, 0xFF8A919E, false);
-            ly += 10;
+        int avail = Math.max(20, preview.w - 8);
+        String full = help.getString();
+        String line = full;
+        helpCut = font.width(full) > avail;
+        if (helpCut) {
+            line = font.plainSubstrByWidth(full, Math.max(10, avail - font.width("..."))) + "...";
         }
+        int hy = preview.y + preview.h - 12;
+        g.drawString(font, line, preview.x + 4, hy, 0xFF8A919E, false);
+        helpText = help;
+        helpX = preview.x + 4;
+        helpY = hy;
+        helpW = font.width(line);
         int toastY = hy - 17;
         if (hoveredTemplate >= 0) {
             Component name = Component.translatable("template.creaturestudio." + Templates.ALL.get(hoveredTemplate).key());
@@ -1878,10 +2343,14 @@ public class EditorScreen extends Screen {
 
     private void renderTabTooltip(GuiGraphics g, int mx, int my) {
         int i = tabAt(mx, my);
+        if (i == -2) {
+            g.renderTooltip(font, tip(Ui.tr(panelCollapsed ? "editor.panel.expand" : "editor.panel.collapse")), mx, my);
+            return;
+        }
         if (i < 0) {
             return;
         }
-        Tab t = TABS[i];
+        Tab t = visibleTabs()[i];
         List<FormattedCharSequence> lines = new ArrayList<>();
         lines.add(t.title().withStyle(ChatFormatting.YELLOW).getVisualOrderText());
         lines.addAll(font.split(t.description(), 190));
@@ -1952,12 +2421,24 @@ public class EditorScreen extends Screen {
             }
             return true;
         }
-        if (mouseY >= HEADER_H && mouseY < TOP) {
-            int t = tabAt(mouseX, mouseY);
-            if (t >= 0 && button == 0 && TABS[t] != tab) {
-                switchTab(TABS[t]);
+        int t = tabAt(mouseX, mouseY);
+        if (t != -1) {
+            if (button == 0) {
+                if (t == -2) {
+                    setPanelCollapsed(!panelCollapsed);
+                } else {
+                    Tab target = visibleTabs()[t];
+                    setPanelCollapsed(false);
+                    switchTab(target);
+                }
                 playClick();
             }
+            return true;
+        }
+        if (button == 0 && dividerHit(mouseX, mouseY)) {
+            resizingPanel = true;
+            resizeX = panelX;
+            setFocused(null);
             return true;
         }
         for (ViewChip c : viewChips) {
@@ -2017,6 +2498,10 @@ public class EditorScreen extends Screen {
         if (dropdown != null) {
             return true;
         }
+        if (resizingPanel) {
+            resizeX = Mth.clamp((int) Math.round(mouseX), width - maxPanel(), width - MIN_PANEL);
+            return true;
+        }
         if (draggingScrollbar) {
             dragScrollbar(mouseY);
             return true;
@@ -2049,6 +2534,13 @@ public class EditorScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (resizingPanel) {
+            resizingPanel = false;
+            EditorSettings.panelWidth = width - resizeX;
+            EditorSettings.save();
+            requestRebuild();
+            return true;
+        }
         if (draggingScrollbar) {
             draggingScrollbar = false;
             return true;
@@ -2104,7 +2596,8 @@ public class EditorScreen extends Screen {
             return true;
         }
         if (preview.contains(mouseX, mouseY)) {
-            preview.zoomBy(scrollY);
+            // como en AutoCAD: se acerca o aleja hacia donde esta el raton
+            preview.zoomAt(scrollY, mouseX, mouseY);
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
@@ -2152,6 +2645,14 @@ public class EditorScreen extends Screen {
                     setMouseMode(!mouseMode);
                     return true;
                 }
+                case GLFW.GLFW_KEY_H -> {
+                    setPanelCollapsed(!panelCollapsed);
+                    return true;
+                }
+                case GLFW.GLFW_KEY_F -> {
+                    preview.fit(def);
+                    return true;
+                }
                 case GLFW.GLFW_KEY_G -> {
                     setTool(Tool.MOVE);
                     return true;
@@ -2185,15 +2686,21 @@ public class EditorScreen extends Screen {
             }
         }
         if (!textFocused()) {
-            if (!hasControlDown() && keyCode >= GLFW.GLFW_KEY_1 && keyCode < GLFW.GLFW_KEY_1 + TABS.length) {
-                switchTab(TABS[keyCode - GLFW.GLFW_KEY_1]);
+            Tab[] visible = visibleTabs();
+            if (!hasControlDown() && keyCode >= GLFW.GLFW_KEY_1 && keyCode < GLFW.GLFW_KEY_1 + visible.length) {
+                setPanelCollapsed(false);
+                switchTab(visible[keyCode - GLFW.GLFW_KEY_1]);
                 return true;
             }
             if (tab.usesPart() && sel() != null) {
                 float step = hasShiftDown() ? 0.25f : (hasControlDown() ? 4f : 1f);
                 switch (keyCode) {
                     case GLFW.GLFW_KEY_DELETE -> {
-                        deleteSelected();
+                        if (tab == Tab.EASY) {
+                            easyDelete();
+                        } else {
+                            deleteSelected();
+                        }
                         return true;
                     }
                     case GLFW.GLFW_KEY_LEFT -> {
@@ -2810,7 +3317,13 @@ public class EditorScreen extends Screen {
 
         @Override
         void render(GuiGraphics g, int mx, int my) {
-            g.drawString(font, text.get(), left(), top(), color, false);
+            Component c = text.get();
+            int max = Math.max(10, contentW - x);
+            if (font.width(c) <= max) {
+                g.drawString(font, c, left(), top(), color, false);
+            } else {
+                g.drawString(font, font.plainSubstrByWidth(c.getString(), max), left(), top(), color, false);
+            }
         }
     }
 
@@ -3254,12 +3767,23 @@ public class EditorScreen extends Screen {
     private final class TextureGrid extends Element {
         private final CreaturePart part;
         private final int cols;
+        /** Cuantas texturas se ensenan (las primeras de la lista). */
+        private final int count;
+        /** Que hacer al elegir una textura (null = ponersela a la pieza). */
+        @Nullable
+        private final Consumer<String> onPick;
 
         TextureGrid(int x, int y, int w, CreaturePart part) {
+            this(x, y, w, part, null, Materials.PRESETS.size());
+        }
+
+        TextureGrid(int x, int y, int w, CreaturePart part, @Nullable Consumer<String> onPick, int limit) {
             super(x, y, w, 0);
             this.part = part;
+            this.onPick = onPick;
+            this.count = Math.max(1, Math.min(limit, Materials.PRESETS.size()));
             this.cols = Math.max(1, w / CELL);
-            this.h = ((Materials.PRESETS.size() + cols - 1) / cols) * CELL;
+            this.h = ((count + cols - 1) / cols) * CELL;
         }
 
         private int indexAt(double mx, double my) {
@@ -3269,7 +3793,7 @@ public class EditorScreen extends Screen {
             int c = (int) ((mx - left()) / CELL);
             int r = (int) ((my - top()) / CELL);
             int i = r * cols + c;
-            return c < cols && i < Materials.PRESETS.size() ? i : -1;
+            return c < cols && i < count ? i : -1;
         }
 
         @Override
@@ -3280,7 +3804,7 @@ public class EditorScreen extends Screen {
             float b = blue(part.color);
             String current = CreatureDefinition.cleanMaterial(part.material);
             int hovered = indexAt(mx, my);
-            for (int i = 0; i < Materials.PRESETS.size(); i++) {
+            for (int i = 0; i < count; i++) {
                 Materials.Preset preset = Materials.PRESETS.get(i);
                 int cx = left() + (i % cols) * CELL;
                 int cy = top() + (i / cols) * CELL;
@@ -3300,8 +3824,13 @@ public class EditorScreen extends Screen {
             if (i < 0) {
                 return false;
             }
-            part.material = Materials.PRESETS.get(i).id();
-            markChanged();
+            String id = Materials.PRESETS.get(i).id();
+            if (onPick != null) {
+                onPick.accept(id);
+            } else {
+                part.material = id;
+                markChanged();
+            }
             playClick();
             return true;
         }
@@ -3313,6 +3842,108 @@ public class EditorScreen extends Screen {
             return i < 0 ? null
                     : tip(Component.translatable("material.creaturestudio." + Materials.PRESETS.get(i).key()));
         }
+    }
+
+    /** Botones con icono para anadir cada parte del cuerpo ya colocada (modo facil). */
+    private final class BodyGrid extends Element {
+        private final BodyParts.Kind[] kinds = BodyParts.Kind.values();
+        private final int cols;
+
+        BodyGrid(int x, int y, int w) {
+            super(x, y, w, 0);
+            this.cols = w >= 260 ? 3 : 2;
+            int rows = (kinds.length + cols - 1) / cols;
+            this.h = rows * (BODY_CELL_H + 2) - 2;
+        }
+
+        private int cellW() {
+            return (w - (cols - 1) * 2) / cols;
+        }
+
+        private int indexAt(double mx, double my) {
+            if (!hit(mx, my)) {
+                return -1;
+            }
+            int cw = cellW();
+            int c = (int) ((mx - left()) / (cw + 2));
+            int r = (int) ((my - top()) / (BODY_CELL_H + 2));
+            int i = r * cols + c;
+            return c < cols && i < kinds.length ? i : -1;
+        }
+
+        @Override
+        void render(GuiGraphics g, int mx, int my) {
+            int hovered = indexAt(mx, my);
+            int cw = cellW();
+            for (int i = 0; i < kinds.length; i++) {
+                int cx = left() + (i % cols) * (cw + 2);
+                int cy = top() + (i / cols) * (BODY_CELL_H + 2);
+                boolean hover = i == hovered;
+                g.fill(cx, cy, cx + cw, cy + BODY_CELL_H, hover ? 0xFF3A4458 : 0xFF2E323C);
+                g.renderOutline(cx, cy, cw, BODY_CELL_H, hover ? Ui.ACCENT : 0xFF454B58);
+                g.renderItem(bodyIcon(kinds[i]), cx + 2, cy + 2);
+                String label = Ui.tr("easy.part." + kinds[i].key).getString();
+                int avail = Math.max(8, cw - 22);
+                int color = hover ? 0xFFFFFFFF : Ui.TEXT;
+                if (font.width(label) <= avail) {
+                    g.drawString(font, label, cx + 20, cy + 6, color, false);
+                } else {
+                    // si no cabe, letra un poco mas pequena
+                    float sc = 0.75f;
+                    String fit = font.plainSubstrByWidth(label, (int) (avail / sc));
+                    g.pose().pushPose();
+                    g.pose().translate(cx + 20, cy + 7, 0f);
+                    g.pose().scale(sc, sc, 1f);
+                    g.drawString(font, fit, 0, 0, color, false);
+                    g.pose().popPose();
+                }
+            }
+        }
+
+        @Override
+        boolean click(double mx, double my, int button) {
+            int i = indexAt(mx, my);
+            if (i < 0) {
+                return false;
+            }
+            addBodyPart(kinds[i]);
+            playClick();
+            return true;
+        }
+
+        @Override
+        @Nullable
+        List<FormattedCharSequence> tooltip(double mx, double my) {
+            int i = indexAt(mx, my);
+            if (i < 0) {
+                return null;
+            }
+            List<FormattedCharSequence> lines = new ArrayList<>();
+            lines.add(Ui.tr("easy.part." + kinds[i].key).withStyle(ChatFormatting.YELLOW).getVisualOrderText());
+            lines.addAll(font.split(Ui.tr("easy.part." + kinds[i].key + ".desc"), 190));
+            return lines;
+        }
+    }
+
+    private static final Map<BodyParts.Kind, ItemStack> BODY_ICONS = new HashMap<>();
+
+    private static ItemStack bodyIcon(BodyParts.Kind kind) {
+        return BODY_ICONS.computeIfAbsent(kind, k -> new ItemStack(switch (k) {
+            case BODY_BIPED -> Items.LEATHER_CHESTPLATE;
+            case BODY_QUADRUPED -> Items.SADDLE;
+            case HEAD -> Items.PLAYER_HEAD;
+            case EYES -> Items.ENDER_EYE;
+            case EARS -> Items.RABBIT_FOOT;
+            case HORNS -> Items.GOAT_HORN;
+            case SNOUT -> Items.PORKCHOP;
+            case ANTENNAE -> Items.END_ROD;
+            case ARMS -> Items.STICK;
+            case LEGS -> Items.LEATHER_BOOTS;
+            case SPIDER_LEGS -> Items.COBWEB;
+            case TAIL -> Items.STRING;
+            case WINGS -> Items.ELYTRA;
+            case FINS -> Items.TROPICAL_FISH;
+        }));
     }
 
     /** Tarjetas de plantillas: al pasar el raton se ven en 3D, con un clic se aplican. */
@@ -3683,7 +4314,7 @@ public class EditorScreen extends Screen {
             }
             this.w = Math.min(maxW, width - 8);
             int below = height - (ay + ah) - 3;
-            int above = ay - TOP - 3;
+            int above = ay - HEADER_H - 3;
             int wanted = items.size() * LIST_ROW + 4;
             boolean down = below >= wanted || below >= above;
             int space = down ? below : above;

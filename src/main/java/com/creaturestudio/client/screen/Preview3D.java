@@ -77,6 +77,27 @@ public class Preview3D {
         zoom = Mth.clamp(zoom * (float) (1.0 + 0.12 * amount), 0.2f, 80f);
     }
 
+    /**
+     * Acerca o aleja hacia el punto de la pantalla (mx, my), como en los programas de CAD: lo que esta debajo
+     * del raton se queda debajo del raton.
+     */
+    public void zoomAt(double amount, double mx, double my) {
+        float old = zoom;
+        zoomBy(amount);
+        if (old <= 0f || zoom == old) {
+            return;
+        }
+        float k = zoom / old;
+        float cx = x + w / 2f;
+        float cy = y + h / 2f;
+        panX = (float) ((mx - cx) * (1f - k) + k * panX);
+        panY = (float) ((my - cy) * (1f - k) + k * panY);
+        // que el modelo no se pierda del todo fuera de la vista
+        float limit = Math.max(w, h) * 4f + zoom * radius * 2f;
+        panX = Mth.clamp(panX, -limit, limit);
+        panY = Mth.clamp(panY, -limit, limit);
+    }
+
     private float depth() {
         return Math.min(200f + zoom * radius * 1.6f, 8000f);
     }

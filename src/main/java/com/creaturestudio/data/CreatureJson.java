@@ -93,6 +93,16 @@ public final class CreatureJson {
             j.addProperty("animation", p.anim.name());
             j.addProperty("animAmount", p.animAmount);
             j.addProperty("animSpeed", p.animSpeed);
+            if (p.hasUv()) {
+                JsonArray uv = new JsonArray();
+                uv.add(p.uvU);
+                uv.add(p.uvV);
+                uv.add(p.uvMirror ? 1 : 0);
+                uv.add(p.uvW);
+                uv.add(p.uvH);
+                uv.add(p.uvD);
+                j.add("uv", uv);
+            }
             if (p.validPaint()) {
                 JsonArray size = new JsonArray();
                 size.add(p.pw);
@@ -104,6 +114,12 @@ public final class CreatureJson {
             parts.add(j);
         }
         o.add("parts", parts);
+        if (d.texW > 0 && d.texH > 0) {
+            JsonArray tex = new JsonArray();
+            tex.add(d.texW);
+            tex.add(d.texH);
+            o.add("textureSize", tex);
+        }
         return o;
     }
 
@@ -154,6 +170,16 @@ public final class CreatureJson {
             if (egg.size() > 1) d.eggColor2 = parseColor(egg.get(1), d.eggColor2);
         }
 
+        if (o.has("textureSize") && o.get("textureSize").isJsonArray() && o.getAsJsonArray("textureSize").size() == 2) {
+            try {
+                d.texW = o.getAsJsonArray("textureSize").get(0).getAsInt();
+                d.texH = o.getAsJsonArray("textureSize").get(1).getAsInt();
+            } catch (RuntimeException e) {
+                d.texW = 0;
+                d.texH = 0;
+            }
+        }
+
         d.parts.clear();
         if (o.has("parts") && o.get("parts").isJsonArray()) {
             for (JsonElement e : o.getAsJsonArray("parts")) {
@@ -188,6 +214,7 @@ public final class CreatureJson {
                 p.animAmount = num(j, "animAmount", 1f);
                 p.animSpeed = num(j, "animSpeed", 1f);
                 readPaint(j, p);
+                readUv(j, p);
                 d.parts.add(p);
             }
         }
@@ -218,6 +245,23 @@ public final class CreatureJson {
                     | (bytes[i * 4 + 1] & 255) << 8 | (bytes[i * 4 + 2] & 255);
         }
         return out;
+    }
+
+    private static void readUv(JsonObject j, CreaturePart p) {
+        try {
+            if (j.has("uv") && j.get("uv").isJsonArray() && j.getAsJsonArray("uv").size() == 6) {
+                JsonArray uv = j.getAsJsonArray("uv");
+                p.uvU = uv.get(0).getAsInt();
+                p.uvV = uv.get(1).getAsInt();
+                p.uvMirror = uv.get(2).getAsInt() != 0;
+                p.uvW = uv.get(3).getAsInt();
+                p.uvH = uv.get(4).getAsInt();
+                p.uvD = uv.get(5).getAsInt();
+            }
+        } catch (RuntimeException e) {
+            p.uvU = -1;
+            p.uvV = -1;
+        }
     }
 
     private static void readPaint(JsonObject j, CreaturePart p) {

@@ -6,6 +6,7 @@ import com.creaturestudio.data.CreaturePart;
 import com.creaturestudio.data.MaterialIds;
 import com.creaturestudio.data.PaintLayout;
 import com.creaturestudio.data.PartAnim;
+import com.creaturestudio.data.SkinLayout;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.geom.ModelLayerLocation;
@@ -26,10 +27,12 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Los modelos de las entidades de Minecraft, convertidos a piezas del editor (forma, articulaciones,
@@ -144,6 +147,7 @@ public final class VanillaModels {
             }
             CreatureDefinition def = new CreatureDefinition();
             def.parts = c.parts;
+            c.assignUv(def);
             def.name = e.name().getString();
             assignAnimations(def.parts);
             def.centerOnGround();
@@ -156,10 +160,15 @@ public final class VanillaModels {
 
     private static final class Converter {
         final List<CreaturePart> parts = new ArrayList<>();
+        /** UV de Minecraft (0..1) del centro de cada texel de la pintura de cada pieza: {u[], v[]} o null. */
+        final List<float[][]> samples = new ArrayList<>();
         @Nullable
         int[] tex;
         int texW;
         int texH;
+        /** Tamano de la textura del modelo (en texels), deducido de los cubos. */
+        float modelW;
+        float modelH;
 
         void loadTexture(ResourceLocation location) {
             ResourceManager rm = Minecraft.getInstance().getResourceManager();
@@ -218,11 +227,16 @@ public final class VanillaModels {
                 g.parent = parent;
                 g.material = MaterialIds.CLEAR;
                 parts.add(g);
+                samples.add(null);
                 first = parts.size() - 1;
             }
             int node = first >= 0 ? first : parent;
             for (Map.Entry<?, ?> child : children.entrySet()) {
-                walk((ModelPart) child.getValue(), String.valueOf(child.getKey()), node, px, py, pz);
+                String childName = String.valueOf(child.getKey());
+                if (HIDDEN.contains(childName)) {
+                    continue; // la capa y las orejas de deadmau5 del jugador solo se ven en casos especiales
+                }
+                walk((ModelPart) child.getValue(), childName, node, px, py, pz);
             }
         }
 
@@ -253,36 +267,44 @@ public final class VanillaModels {
             }
             p.parent = parent;
             p.color = 0xFFFFFF;
+            float[][] uv = paint(p, cube, polygons, px, py, pz);
             if (tex != null) {
+                // Con textura: lo transparente (capas exteriores como la chaqueta) queda invisible.
                 p.material = MaterialIds.CLEAR;
-                paint(p, cube, polygons, px, py, pz);
                 if (!p.hasPaint()) {
                     p.clearPaint();
-                    p.material = MaterialIds.SMOOTH;
-                    p.color = 0xC8C8C8;
                 }
             } else {
+                p.clearPaint();
                 p.material = MaterialIds.SMOOTH;
                 p.color = 0xC8C8C8;
             }
             parts.add(p);
+            samples.add(uv);
             return parts.size() - 1;
         }
 
-        /** Copia la textura de Minecraft en la pintura de la pieza, cara por cara. */
-        private void paint(CreaturePart p, Object cube, Object[] polygons, float px, float py, float pz)
+        /**
+         * Copia la textura de Minecraft (si hay) en la pintura de la pieza, cara por cara, y devuelve la UV de cada
+         * texel para poder aplicar despues otras skins con el mismo formato.
+         */
+        private float[][] paint(CreaturePart p, Object cube, Object[] polygons, float px, float py, float pz)
                 throws ReflectiveOperationException {
             int[] t = tex;
-            if (t == null) {
-                return;
-            }
             float dimX = number(cube, "maxX") - number(cube, "minX");
             float dimY = number(cube, "maxY") - number(cube, "minY");
             float dimZ = number(cube, "maxZ") - number(cube, "minZ");
             p.pw = dim(dimX);
             p.ph = dim(dimY);
             p.pd = dim(dimZ);
+            p.uvW = uvDim(dimX);
+            p.uvH = uvDim(dimY);
+            p.uvD = uvDim(dimZ);
             p.paint = new int[PaintLayout.imageW(p.pw, p.pd) * PaintLayout.imageH(p.ph, p.pd)];
+            float[] us = new float[p.paint.length];
+            float[] vs = new float[p.paint.length];
+            java.util.Arrays.fill(us, Float.NaN);
+            int imageW = PaintLayout.imageW(p.pw, p.pd);
             for (Object poly : polygons) {
                 Object[] verts = (Object[]) get(poly, "vertices");
                 if (verts.length < 4) {
@@ -306,6 +328,8 @@ public final class VanillaModels {
                 if (face < 0) {
                     continue;
                 }
+                learnTextureSize(face, uv, dimX, dimY, dimZ);
+                int[] region = PaintLayout.region(face, p.pw, p.ph, p.pd);
                 int fw = PaintLayout.faceW(face, p.pw, p.pd);
                 int fh = PaintLayout.faceH(face, p.ph, p.pd);
                 float[] fr = PaintLayout.frame(face, p.x, p.y, p.z, p.x + p.w, p.y + p.h, p.z + p.d);
@@ -322,6 +346,12 @@ public final class VanillaModels {
                         float b = dot(q, e3) / l3;
                         float u = uv[0][0] + a * (uv[1][0] - uv[0][0]) + b * (uv[3][0] - uv[0][0]);
                         float v = uv[0][1] + a * (uv[1][1] - uv[0][1]) + b * (uv[3][1] - uv[0][1]);
+                        int k = (region[1] + j) * imageW + region[0] + i;
+                        us[k] = u;
+                        vs[k] = v;
+                        if (t == null) {
+                            continue;
+                        }
                         int tx = Math.max(0, Math.min(texW - 1, (int) Math.floor(u * texW)));
                         int ty = Math.max(0, Math.min(texH - 1, (int) Math.floor(v * texH)));
                         int c = t[ty * texW + tx];
@@ -331,6 +361,97 @@ public final class VanillaModels {
                     }
                 }
             }
+            return new float[][]{us, vs};
+        }
+
+        /** El tamano de la textura del modelo sale de cuanto ocupa una cara en UV frente a su tamano en pixeles. */
+        private void learnTextureSize(int face, float[][] uv, float dimX, float dimY, float dimZ) {
+            if (modelW > 0f && modelH > 0f) {
+                return;
+            }
+            float u0 = Math.min(Math.min(uv[0][0], uv[1][0]), Math.min(uv[2][0], uv[3][0]));
+            float u1 = Math.max(Math.max(uv[0][0], uv[1][0]), Math.max(uv[2][0], uv[3][0]));
+            float v0 = Math.min(Math.min(uv[0][1], uv[1][1]), Math.min(uv[2][1], uv[3][1]));
+            float v1 = Math.max(Math.max(uv[0][1], uv[1][1]), Math.max(uv[2][1], uv[3][1]));
+            boolean side = face == PaintLayout.LEFT || face == PaintLayout.RIGHT;
+            boolean cap = face == PaintLayout.TOP || face == PaintLayout.BOTTOM;
+            float du = side ? dimZ : dimX;
+            float dv = cap ? dimZ : dimY;
+            if (modelW <= 0f && du >= 1f && u1 - u0 > 1.0e-5f) {
+                modelW = Math.round(du / (u1 - u0));
+            }
+            if (modelH <= 0f && dv >= 1f && v1 - v0 > 1.0e-5f) {
+                modelH = Math.round(dv / (v1 - v0));
+            }
+        }
+
+        /**
+         * Da a cada pieza su sitio en la skin (esquina y si va reflejada), comprobando texel a texel que coincide con
+         * como lo pinta Minecraft. Las piezas que no encajan se quedan sin sitio.
+         */
+        void assignUv(CreatureDefinition def) {
+            if (modelW < 8f || modelH < 8f) {
+                return;
+            }
+            int tw = (int) modelW;
+            int th = (int) modelH;
+            boolean any = false;
+            for (int n = 0; n < parts.size(); n++) {
+                float[][] uv = samples.get(n);
+                if (uv == null) {
+                    continue;
+                }
+                CreaturePart p = parts.get(n);
+                if (fitUv(p, uv, tw, th, false) || fitUv(p, uv, tw, th, true)) {
+                    any = true;
+                } else {
+                    p.uvU = -1;
+                    p.uvV = -1;
+                }
+            }
+            if (any) {
+                def.texW = tw;
+                def.texH = th;
+            }
+        }
+
+        private boolean fitUv(CreaturePart p, float[][] uv, int tw, int th, boolean mirror) {
+            p.uvMirror = mirror;
+            int imageW = PaintLayout.imageW(p.pw, p.pd);
+            int total = 0;
+            int good = 0;
+            boolean placed = false;
+            for (int f = 0; f < PaintLayout.FACES; f++) {
+                int[] r = PaintLayout.region(f, p.pw, p.ph, p.pd);
+                for (int j = 0; j < r[3]; j++) {
+                    for (int i = 0; i < r[2]; i++) {
+                        int k = (r[1] + j) * imageW + r[0] + i;
+                        if (Float.isNaN(uv[0][k])) {
+                            continue;
+                        }
+                        int sx = (int) Math.floor(uv[0][k] * tw + 1.0e-3f);
+                        int sy = (int) Math.floor(uv[1][k] * th + 1.0e-3f);
+                        if (!placed) {
+                            // la esquina sale del primer texel: skinTexel = (uvU + ..., uvV + ...)
+                            p.uvU = 0;
+                            p.uvV = 0;
+                            int[] rel = SkinLayout.skinTexel(p, f, i, j);
+                            if (rel == null) {
+                                continue;
+                            }
+                            p.uvU = sx - rel[0];
+                            p.uvV = sy - rel[1];
+                            placed = true;
+                        }
+                        int[] e = SkinLayout.skinTexel(p, f, i, j);
+                        total++;
+                        if (e != null && e[0] == sx && e[1] == sy) {
+                            good++;
+                        }
+                    }
+                }
+            }
+            return placed && p.uvU >= 0 && p.uvV >= 0 && total > 0 && good >= total * 0.97f;
         }
     }
 
@@ -360,6 +481,10 @@ public final class VanillaModels {
 
     private static int dim(float size) {
         return Math.max(1, Math.min(PaintLayout.MAX_DIM, Math.round(size)));
+    }
+
+    private static int uvDim(float size) {
+        return Math.max(0, Math.min(PaintLayout.MAX_DIM, Math.round(size)));
     }
 
     private static float[] sub(float[] a, float[] b) {
@@ -415,6 +540,45 @@ public final class VanillaModels {
         };
     }
 
+    /** Piezas que el jugador solo ensena en casos especiales. */
+    private static final Set<String> HIDDEN = Set.of("cloak", "ear");
+
+    /** Texturas conocidas (textures/entity/...) de mobs cuyo nombre no coincide con el del modelo. */
+    private static final Map<String, String> KNOWN = Map.ofEntries(
+            Map.entry("player", "player/wide/steve"), Map.entry("player_slim", "player/slim/alex"),
+            Map.entry("ender_dragon", "enderdragon/dragon"), Map.entry("elder_guardian", "guardian_elder"),
+            Map.entry("magma_cube", "slime/magmacube"), Map.entry("mooshroom", "cow/red_mooshroom"),
+            Map.entry("horse", "horse/horse_white"), Map.entry("donkey", "horse/donkey"), Map.entry("mule", "horse/mule"),
+            Map.entry("skeleton_horse", "horse/horse_skeleton"), Map.entry("zombie_horse", "horse/horse_zombie"),
+            Map.entry("cat", "cat/tabby"), Map.entry("ocelot", "cat/ocelot"), Map.entry("llama", "llama/creamy"),
+            Map.entry("trader_llama", "llama/creamy"), Map.entry("parrot", "parrot/parrot_red_blue"),
+            Map.entry("rabbit", "rabbit/brown"), Map.entry("axolotl", "axolotl/axolotl_lucy"),
+            Map.entry("frog", "frog/temperate_frog"), Map.entry("turtle", "turtle/big_sea_turtle"),
+            Map.entry("polar_bear", "bear/polarbear"), Map.entry("armor_stand", "armorstand/wood"),
+            Map.entry("vex", "illager/vex"), Map.entry("evoker", "illager/evoker"), Map.entry("vindicator", "illager/vindicator"),
+            Map.entry("pillager", "illager/pillager"), Map.entry("illusioner", "illager/illusioner"),
+            Map.entry("ravager", "illager/ravager"), Map.entry("zoglin", "hoglin/zoglin"), Map.entry("drowned", "zombie/drowned"),
+            Map.entry("husk", "zombie/husk"), Map.entry("stray", "skeleton/stray"), Map.entry("bogged", "skeleton/bogged"),
+            Map.entry("wither_skeleton", "skeleton/wither_skeleton"), Map.entry("cod", "fish/cod"),
+            Map.entry("salmon", "fish/salmon"), Map.entry("pufferfish_big", "fish/pufferfish"),
+            Map.entry("pufferfish_medium", "fish/pufferfish"), Map.entry("pufferfish_small", "fish/pufferfish"),
+            Map.entry("tropical_fish_large", "fish/tropical_b"), Map.entry("tropical_fish_small", "fish/tropical_a"),
+            Map.entry("minecart", "minecart"), Map.entry("chest_minecart", "minecart"), Map.entry("furnace_minecart", "minecart"),
+            Map.entry("hopper_minecart", "minecart"), Map.entry("tnt_minecart", "minecart"),
+            Map.entry("spawner_minecart", "minecart"), Map.entry("command_block_minecart", "minecart"),
+            Map.entry("glow_squid", "squid/glow_squid"), Map.entry("cave_spider", "spider/cave_spider"),
+            Map.entry("zombified_piglin", "piglin/zombified_piglin"), Map.entry("piglin_brute", "piglin/piglin_brute"),
+            Map.entry("evoker_fangs", "illager/evoker_fangs"), Map.entry("giant", "zombie/zombie"),
+            Map.entry("snow_golem", "snow_golem"), Map.entry("wither_skull", "wither/wither"),
+            Map.entry("llama_spit", "llama/spit"), Map.entry("leash_knot", "lead_knot"),
+            Map.entry("shulker_bullet", "shulker/spark"), Map.entry("chest", "chest/normal"),
+            Map.entry("double_chest_left", "chest/normal_left"), Map.entry("double_chest_right", "chest/normal_right"));
+
+    /** Palabras de texturas que no son la principal (ojos, brillos, sillas...). */
+    private static final String[] EXTRA_WORDS = {"eyes", "overlay", "glow", "saddle", "armor", "collar", "angry", "tame",
+            "decor", "charging", "invulnerable", "shooting", "emissive", "markings", "outer", "baby", "crackiness",
+            "pattern", "spots", "heart", "pivots", "bloom"};
+
     /** Busca la textura probable del modelo (las entidades suelen usar textures/entity/<nombre>...). */
     @Nullable
     static ResourceLocation findTexture(String model, String layer) {
@@ -425,20 +589,26 @@ public final class VanillaModels {
         String ns = rl.getNamespace();
         String path = rl.getPath();
         String name = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
+        boolean main = layer.equals("main");
+        String known = KNOWN.get(path);
         List<String> candidates = new ArrayList<>();
-        if (path.equals("player")) {
-            candidates.add("player/wide/steve");
-        } else if (path.equals("player_slim")) {
-            candidates.add("player/slim/alex");
-        }
-        if (!layer.equals("main")) {
+        if (!main) {
+            if (known != null) {
+                candidates.add(known + "_" + layer);
+                candidates.add(known + "_" + layer + "_layer");
+            }
             candidates.add(path + "/" + name + "_" + layer);
             candidates.add(path + "_" + layer);
-        }
-        candidates.add(path + "/" + name);
-        candidates.add(path);
-        for (String word : name.split("_")) {
-            candidates.add(word + "/" + name);
+            candidates.add(path + "/" + layer);
+        } else {
+            if (known != null) {
+                candidates.add(known);
+            }
+            candidates.add(path + "/" + name);
+            candidates.add(path);
+            for (String word : name.split("_")) {
+                candidates.add(word + "/" + name);
+            }
         }
         ResourceManager rm = Minecraft.getInstance().getResourceManager();
         for (String c : candidates) {
@@ -447,7 +617,68 @@ public final class VanillaModels {
                 return tex;
             }
         }
-        return null;
+        // Ultimo recurso: la imagen que mejor encaje dentro de la carpeta del mob (p. ej. variantes de color).
+        Set<String> folders = new LinkedHashSet<>();
+        folders.add(path);
+        if (known != null && known.contains("/")) {
+            folders.add(known.substring(0, known.lastIndexOf('/')));
+        }
+        for (String word : name.split("_")) {
+            folders.add(word);
+        }
+        ResourceLocation best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (String folder : folders) {
+            String base = "textures/entity/" + folder;
+            Map<ResourceLocation, Resource> found;
+            try {
+                found = rm.listResources(base, loc -> loc.getPath().endsWith(".png"));
+            } catch (RuntimeException ex) {
+                continue;
+            }
+            for (ResourceLocation file : found.keySet()) {
+                if (!file.getNamespace().equals(ns) || file.getPath().length() <= base.length() + 1) {
+                    continue;
+                }
+                int score = score(file.getPath().substring(base.length() + 1), name, layer);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = file;
+                }
+            }
+        }
+        return bestScore > -40 ? best : null;
+    }
+
+    /** Puntuacion de una imagen de la carpeta del mob (mayor = mas probable que sea su textura). */
+    static int score(String file, String name, String layer) {
+        String f = file.toLowerCase(Locale.ROOT);
+        String fileName = f.substring(f.lastIndexOf('/') + 1).replace(".png", "");
+        boolean main = layer.equals("main");
+        int score = 0;
+        if (fileName.equals(name)) {
+            score += main ? 100 : 50;
+        } else if (fileName.startsWith(name)) {
+            score += 40;
+        } else if (fileName.contains(name) || name.contains(fileName)) {
+            score += 20;
+        }
+        boolean extra = false;
+        for (String w : EXTRA_WORDS) {
+            if (fileName.contains(w)) {
+                extra = true;
+                break;
+            }
+        }
+        if (main) {
+            // la textura principal no suele ser la de los ojos, brillos... ni estar en una subcarpeta
+            score -= (extra ? 60 : 0) + (f.contains("/") ? 30 : 0);
+        } else if (f.contains(layer)) {
+            score += 80;
+        } else if (extra) {
+            score += 60;
+        }
+        return score - f.length() / 8;
     }
 
     // ---------------------------------------------------------------------------------------

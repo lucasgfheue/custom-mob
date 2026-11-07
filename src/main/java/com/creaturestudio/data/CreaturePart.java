@@ -41,6 +41,36 @@ public class CreaturePart {
     public int ph;
     public int pd;
 
+    /**
+     * Sitio de la pieza en una textura (skin) con el formato de caja de Minecraft: esquina (uvU, uvV), o -1
+     * si no tiene. uvMirror: la pieza usa esa zona reflejada (como las patas del otro lado en Minecraft).
+     */
+    public int uvU = -1;
+    public int uvV = -1;
+    public boolean uvMirror;
+    public int uvW;
+    public int uvH;
+    public int uvD;
+
+    /** Tamano de la pieza en la skin (texels de ancho, alto y fondo; 0 en piezas planas como las aletas). */
+    public boolean hasUv() {
+        if (uvU < 0 || uvV < 0 || uvW < 0 || uvH < 0 || uvD < 0
+                || uvW > PaintLayout.MAX_DIM || uvH > PaintLayout.MAX_DIM || uvD > PaintLayout.MAX_DIM) {
+            return false;
+        }
+        return (uvW > 0 ? 1 : 0) + (uvH > 0 ? 1 : 0) + (uvD > 0 ? 1 : 0) >= 2;
+    }
+
+    /** Quita el sitio en la skin. */
+    public void clearUv() {
+        uvU = -1;
+        uvV = -1;
+        uvMirror = false;
+        uvW = 0;
+        uvH = 0;
+        uvD = 0;
+    }
+
     public CreaturePart() {
     }
 
@@ -71,6 +101,12 @@ public class CreaturePart {
         c.pw = pw;
         c.ph = ph;
         c.pd = pd;
+        c.uvU = uvU;
+        c.uvV = uvV;
+        c.uvMirror = uvMirror;
+        c.uvW = uvW;
+        c.uvH = uvH;
+        c.uvD = uvD;
         return c;
     }
 
@@ -86,6 +122,7 @@ public class CreaturePart {
         if (validPaint()) {
             c.paint = mirroredPaint();
         }
+        c.uvMirror = !uvMirror;
         return c;
     }
 
