@@ -1,6 +1,6 @@
 package com.creaturestudio.client.screen;
 
-import net.minecraft.client.Font;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
