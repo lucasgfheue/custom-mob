@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "CEC",
+    "PBP",
+    "PPP"
+  ],
+  "key": {
+    "C": { "item": "minecraft:clay_ball" },
+    "E": { "item": "minecraft:egg" },
+    "B": { "item": "minecraft:book" },
+    "P": { "tag": "minecraft:planks" }
+  },
+  "result": {
+    "count": 1,
+    "id": "creaturestudio:creature_studio"
+  }
+}
