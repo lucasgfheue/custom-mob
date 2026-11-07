@@ -6,6 +6,7 @@ import com.creaturestudio.data.MaterialIds;
 import com.creaturestudio.data.PaintLayout;
 import com.creaturestudio.data.PartAnim;
 import com.creaturestudio.data.PoseSolver;
+import com.creaturestudio.data.Voxels;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.renderer.LightTexture;
@@ -18,6 +19,8 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.function.Function;
 
 /**
@@ -121,8 +124,103 @@ public final class CreatureModelRenderer {
             root.normal().mul(rotation, normal);
             TextureAtlasSprite sprite = Materials.sprite(atlas, p.material);
             int color = multiply(0xFF000000 | p.color, tint);
+            int lt = p.glow ? LightTexture.FULL_BRIGHT : light;
             drawBox(vc, m, normal, p.x, p.y, p.z, p.x + p.w, p.y + p.h, p.z + p.d, sprite, p.stretch, color,
-                    p.glow ? LightTexture.FULL_BRIGHT : light, overlay);
+                    lt, overlay);
+            if (p.voxels != null && p.voxels.length >= 2) {
+                drawVoxels(vc, m, normal, p, Materials.sprite(atlas, MaterialIds.SOLID), tint, lt, overlay);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Minibloques
+    // ---------------------------------------------------------------------------------------
+
+    /** Caras que se ven de cada lista de minibloques (las listas no cambian nunca: cada cambio crea otra). */
+    private static final Map<int[], byte[]> EXPOSED = new WeakHashMap<>();
+
+    private static byte[] exposed(int[] voxels) {
+        byte[] mask = EXPOSED.get(voxels);
+        if (mask == null) {
+            mask = Voxels.exposed(voxels);
+            EXPOSED.put(voxels, mask);
+        }
+        return mask;
+    }
+
+    /** Dibuja los minibloques de una pieza (solo las caras que no tapa otro minibloque). */
+    private static void drawVoxels(VertexConsumer vc, Matrix4f m, Matrix3f nm, CreaturePart p, TextureAtlasSprite s,
+                                   int tint, int light, int overlay) {
+        int[] v = p.voxels;
+        byte[] mask = exposed(v);
+        for (int i = 0; i < mask.length; i++) {
+            int faces = mask[i];
+            if (faces == 0) {
+                continue;
+            }
+            int pos = v[i * 2];
+            int color = multiply(0xFF000000 | (v[i * 2 + 1] & 0xFFFFFF), tint);
+            float x0 = p.x + Voxels.x(pos);
+            float y0 = p.y + Voxels.y(pos);
+            float z0 = p.z + Voxels.z(pos);
+            float x1 = x0 + 1f;
+            float y1 = y0 + 1f;
+            float z1 = z0 + 1f;
+            if ((faces & 1) != 0) { // frente (-Z)
+                face(vc, m, nm, x0, y1, z0, 1, 0, 0, 0, -1, 0, 1f, 1f, 0, 0, -1, s, true, color, light, overlay);
+            }
+            if ((faces & 2) != 0) { // atras (+Z)
+                face(vc, m, nm, x1, y1, z1, -1, 0, 0, 0, -1, 0, 1f, 1f, 0, 0, 1, s, true, color, light, overlay);
+            }
+            if ((faces & 4) != 0) { // +X
+                face(vc, m, nm, x1, y1, z0, 0, 0, 1, 0, -1, 0, 1f, 1f, 1, 0, 0, s, true, color, light, overlay);
+            }
+            if ((faces & 8) != 0) { // -X
+                face(vc, m, nm, x0, y1, z1, 0, 0, -1, 0, -1, 0, 1f, 1f, -1, 0, 0, s, true, color, light, overlay);
+            }
+            if ((faces & 16) != 0) { // arriba
+                face(vc, m, nm, x0, y1, z1, 1, 0, 0, 0, 0, -1, 1f, 1f, 0, 1, 0, s, true, color, light, overlay);
+            }
+            if ((faces & 32) != 0) { // abajo
+                face(vc, m, nm, x0, y0, z0, 1, 0, 0, 0, 0, 1, 1f, 1f, 0, -1, 0, s, true, color, light, overlay);
+            }
+        }
+    }
+
+    /**
+     * Contorno de un hueco de minibloque (para ver donde se pondra o cual se borrara) en el espacio de la pieza.
+     */
+    public static void renderVoxelCursor(Matrix4f partMat, PoseStack.Pose root, VertexConsumer vc, CreaturePart p,
+                                         int pos, int color, float thickness) {
+        Matrix4f m = new Matrix4f();
+        root.pose().mul(partMat, m);
+        Matrix3f rotation = new Matrix3f();
+        partMat.get3x3(rotation);
+        Matrix3f normal = new Matrix3f();
+        root.normal().mul(rotation, normal);
+        TextureAtlasSprite solid = Materials.sprite(MaterialIds.SOLID);
+        float h = thickness / 2f;
+        float x0 = p.x + Voxels.x(pos);
+        float y0 = p.y + Voxels.y(pos);
+        float z0 = p.z + Voxels.z(pos);
+        float[] xs = {x0, x0 + 1f};
+        float[] ys = {y0, y0 + 1f};
+        float[] zs = {z0, z0 + 1f};
+        for (float y : ys) {
+            for (float z : zs) {
+                bar(vc, m, normal, solid, xs[0] - h, y - h, z - h, xs[1] + h, y + h, z + h, color);
+            }
+        }
+        for (float x : xs) {
+            for (float z : zs) {
+                bar(vc, m, normal, solid, x - h, ys[0] - h, z - h, x + h, ys[1] + h, z + h, color);
+            }
+        }
+        for (float x : xs) {
+            for (float y : ys) {
+                bar(vc, m, normal, solid, x - h, y - h, zs[0] - h, x + h, y + h, zs[1] + h, color);
+            }
         }
     }
 

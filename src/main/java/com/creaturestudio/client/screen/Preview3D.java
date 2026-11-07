@@ -6,6 +6,7 @@ import com.creaturestudio.client.render.PaintAtlas;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreaturePart;
 import com.creaturestudio.data.PaintLayout;
+import com.creaturestudio.data.Voxels;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -24,6 +25,8 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
 
+import java.util.Set;
+
 /**
  * Vista 3D del modelo dentro de una pantalla: girar arrastrando, mover con el boton derecho,
  * acercar con la rueda y seleccionar piezas con un clic (lanzando un rayo contra los cubos).
@@ -36,6 +39,11 @@ public class Preview3D {
     public float panX, panY;
     private final float[] center = {0f, 8f, 0f};
     private float radius = 16f;
+
+    /** Contorno de un hueco de minibloque que se dibuja encima del modelo (pieza -1 = ninguno). */
+    public int cursorPart = -1;
+    public int cursorPos;
+    public int cursorColor;
 
     public void setArea(int x, int y, int w, int h) {
         this.x = x;
@@ -166,6 +174,10 @@ public class Preview3D {
         if (selected >= 0) {
             CreatureModelRenderer.renderSelection(def, mats, pose, vc, selected, thickness);
         }
+        if (cursorPart >= 0 && cursorPart < def.parts.size() && cursorPart < mats.length) {
+            CreatureModelRenderer.renderVoxelCursor(mats[cursorPart], pose, vc, def.parts.get(cursorPart), cursorPos,
+                    cursorColor, thickness);
+        }
         g.flush();
         ps.popPose();
         g.disableScissor();
@@ -180,12 +192,37 @@ public class Preview3D {
         return hit == null ? -1 : hit.part();
     }
 
-    /** Lo que hay bajo el raton: pieza, cara (ver {@link PaintLayout}) y punto en coordenadas de la pieza. */
-    public record Hit(int part, int face, float x, float y, float z) {
+    /**
+     * Lo que hay bajo el raton: pieza, cara (ver {@link PaintLayout}), punto en coordenadas de la pieza y, si es un
+     * minibloque, su posicion empaquetada ({@link Voxels#pack}); voxel = -1 si es la caja de la pieza.
+     */
+    public record Hit(int part, int face, float x, float y, float z, int voxel) {
+        public Hit(int part, int face, float x, float y, float z) {
+            this(part, face, x, y, z, -1);
+        }
+
+        public boolean isVoxel() {
+            return voxel >= 0;
+        }
+    }
+
+    /** Clave de un minibloque para {@link #pickHit(CreatureDefinition, Matrix4f[], double, double, Set, boolean)}. */
+    public static long voxelKey(int part, int pos) {
+        return ((long) part << 32) | (pos & 0xFFFFFFFFL);
     }
 
     @Nullable
     public Hit pickHit(CreatureDefinition def, Matrix4f[] mats, double mx, double my) {
+        return pickHit(def, mats, mx, my, null, false);
+    }
+
+    /**
+     * @param ignore     minibloques que no cuentan (los puestos en el trazo actual, para pintar una capa)
+     * @param voxelsOnly solo minibloques (para la goma)
+     */
+    @Nullable
+    public Hit pickHit(CreatureDefinition def, Matrix4f[] mats, double mx, double my, @Nullable Set<Long> ignore,
+                       boolean voxelsOnly) {
         if (!contains(mx, my) || def.parts.isEmpty()) {
             return null;
         }
@@ -202,7 +239,7 @@ public class Preview3D {
             inverse.transformPosition((float) mx, (float) my, 20000f, a);
             inverse.transformPosition((float) mx, (float) my, -20000f, b);
             CreaturePart p = def.parts.get(i);
-            float t = rayBox(a, b, p.x, p.y, p.z, p.x + p.w, p.y + p.h, p.z + p.d);
+            float t = voxelsOnly ? -1f : rayBox(a, b, p.x, p.y, p.z, p.x + p.w, p.y + p.h, p.z + p.d);
             if (t >= 0f && t < best) {
                 best = t;
                 float hx = a.x + (b.x - a.x) * t;
@@ -210,6 +247,28 @@ public class Preview3D {
                 float hz = a.z + (b.z - a.z) * t;
                 int face = PaintLayout.faceAt(hx, hy, hz, p.x, p.y, p.z, p.x + p.w, p.y + p.h, p.z + p.d);
                 bestHit = new Hit(i, face, hx, hy, hz);
+            }
+            int[] vox = p.voxels;
+            if (vox == null) {
+                continue;
+            }
+            for (int k = 0; k + 1 < vox.length; k += 2) {
+                int pos = vox[k];
+                if (ignore != null && ignore.contains(voxelKey(i, pos))) {
+                    continue;
+                }
+                float x0 = p.x + Voxels.x(pos);
+                float y0 = p.y + Voxels.y(pos);
+                float z0 = p.z + Voxels.z(pos);
+                float tv = rayBox(a, b, x0, y0, z0, x0 + 1f, y0 + 1f, z0 + 1f);
+                if (tv >= 0f && tv < best) {
+                    best = tv;
+                    float hx = a.x + (b.x - a.x) * tv;
+                    float hy = a.y + (b.y - a.y) * tv;
+                    float hz = a.z + (b.z - a.z) * tv;
+                    int face = PaintLayout.faceAt(hx, hy, hz, x0, y0, z0, x0 + 1f, y0 + 1f, z0 + 1f);
+                    bestHit = new Hit(i, face, hx, hy, hz, pos);
+                }
             }
         }
         return bestHit;

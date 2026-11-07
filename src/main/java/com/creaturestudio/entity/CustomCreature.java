@@ -5,6 +5,7 @@ import com.creaturestudio.data.Behavior;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureDrop;
 import com.creaturestudio.data.CreatureStore;
+import com.creaturestudio.data.DoorMode;
 import com.creaturestudio.data.Movement;
 import com.creaturestudio.data.RangedType;
 import com.creaturestudio.item.CreatureEggItem;
@@ -24,6 +25,7 @@ import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
@@ -40,7 +42,10 @@ import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.control.FlyingMoveControl;
 import net.minecraft.world.entity.ai.control.MoveControl;
+import net.minecraft.world.entity.ai.goal.BreakDoorGoal;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
+import net.minecraft.world.entity.ai.goal.LeapAtTargetGoal;
+import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.PanicGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
@@ -50,8 +55,13 @@ import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.navigation.FlyingPathNavigation;
 import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
+import net.minecraft.world.entity.ai.navigation.WallClimberNavigation;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.ProjectileDeflection;
+import net.minecraft.world.entity.ai.targeting.TargetingConditions;
+import net.minecraft.world.item.ItemUtils;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -69,6 +79,12 @@ import org.jetbrains.annotations.Nullable;
 public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     private static final EntityDataAccessor<String> DATA_CREATURE_ID =
             SynchedEntityData.defineId(CustomCreature.class, EntityDataSerializers.STRING);
+    /** Creeper: 1 = se hincha, -1 = se deshincha. */
+    private static final EntityDataAccessor<Integer> DATA_SWELL_DIR =
+            SynchedEntityData.defineId(CustomCreature.class, EntityDataSerializers.INT);
+    /** Guardian: entidad a la que apunta el rayo (0 = ninguna). */
+    private static final EntityDataAccessor<Integer> DATA_BEAM_TARGET =
+            SynchedEntityData.defineId(CustomCreature.class, EntityDataSerializers.INT);
     /** Alcance de golpe de los mobs normales (Mob.DEFAULT_ATTACK_REACH). */
     private static final double VANILLA_REACH = Math.sqrt(2.04) - 0.6;
 
@@ -91,6 +107,27 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     // Escudo: ticks que lo tiene bajado para atacar
     private int shieldDown;
 
+    // Habilidades
+    private final CreatureAbilities abilities = new CreatureAbilities(this);
+    /** Slime: 0 = la original; 1, 2... = pedazos (mas pequenos y sin reaparicion). */
+    private int generation;
+    /** Invocada por otra criatura: no invoca ni reaparece. */
+    private boolean summoned;
+    /** Ya exploto (creeper): no se divide. */
+    private boolean exploded;
+    private int swell;
+    private int oldSwell;
+    private int clientBeamTime;
+    int explodeCooldown;
+    int beamCooldown;
+    int sonicCooldown;
+    int chargeCooldown;
+    private int milkTimer;
+
+    // Para que las condiciones de los objetivos de IA no pregunten la definicion a cada momento
+    private boolean appliedClimb;
+    private boolean appliedDoors;
+
     public CustomCreature(EntityType<? extends CustomCreature> type, Level level) {
         super(type, level);
     }
@@ -110,6 +147,8 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
         builder.define(DATA_CREATURE_ID, "");
+        builder.define(DATA_SWELL_DIR, -1);
+        builder.define(DATA_BEAM_TARGET, 0);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -151,7 +190,18 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     }
 
     private boolean canFight() {
-        return behavior() != Behavior.PASSIVE;
+        CreatureDefinition d = def();
+        return behavior() != Behavior.PASSIVE || (d != null && d.abilities.stareAnger);
+    }
+
+    /** Puede atacar ahora (para las habilidades de ataque). */
+    boolean canFightNow() {
+        return canFight();
+    }
+
+    private boolean blind() {
+        CreatureDefinition d = def();
+        return d != null && d.abilities.blind;
     }
 
     private boolean seesThroughWalls() {
@@ -164,8 +214,11 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         if (d == null) {
             return;
         }
-        setBase(Attributes.MAX_HEALTH, d.health);
-        setBase(Attributes.ATTACK_DAMAGE, d.damage);
+        // Los pedazos de un slime son mas pequenos (y tienen menos vida y fuerza)
+        double size = Math.pow(0.5, this.generation);
+        setBase(Attributes.MAX_HEALTH, Math.max(1.0, d.health * size));
+        setBase(Attributes.ATTACK_DAMAGE, d.damage * size);
+        setBase(Attributes.SCALE, size);
         setBase(Attributes.ATTACK_KNOCKBACK, d.meleeKnockback);
         setBase(Attributes.MOVEMENT_SPEED, d.speed);
         setBase(Attributes.FLYING_SPEED, d.speed * 1.6);
@@ -176,7 +229,8 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
             this.setHealth(this.getMaxHealth());
         }
         this.xpReward = d.xp;
-        updateMovement(d.movement);
+        this.setCanPickUpLoot(d.abilities.pickUp);
+        updateMovement(d.movement, d.abilities.climb, d.abilities.doors != DoorMode.NONE);
         applyEquipment(d);
         this.appliedRevision = d.revision;
         this.appliedId = d.id;
@@ -190,10 +244,13 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         }
     }
 
-    private void updateMovement(Movement movement) {
-        if (movement == this.appliedMovement) {
+    private void updateMovement(Movement movement, boolean climb, boolean doors) {
+        boolean wantClimb = climb && movement != Movement.FLY;
+        if (movement == this.appliedMovement && wantClimb == this.appliedClimb && doors == this.appliedDoors) {
             return;
         }
+        this.appliedClimb = wantClimb;
+        this.appliedDoors = doors;
         if (movement == Movement.FLY) {
             this.moveControl = new FlyingMoveControl(this, 20, true);
             FlyingPathNavigation nav = new FlyingPathNavigation(this, this.level());
@@ -202,8 +259,11 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
             this.setNoGravity(true);
         } else {
             this.moveControl = new MoveControl(this);
-            GroundPathNavigation nav = new GroundPathNavigation(this, this.level());
+            // Arana: navegacion que trepa paredes
+            GroundPathNavigation nav = wantClimb ? new WallClimberNavigation(this, this.level())
+                    : new GroundPathNavigation(this, this.level());
             nav.setCanFloat(true);
+            nav.setCanOpenDoors(doors);
             this.navigation = nav;
             this.setNoGravity(false);
         }
@@ -214,7 +274,7 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     // Equipo
     // ---------------------------------------------------------------------------------------
 
-    private static ItemStack stackOf(String id) {
+    static ItemStack stackOf(String id) {
         if (id == null || id.isEmpty()) {
             return ItemStack.EMPTY;
         }
@@ -291,7 +351,20 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new ConditionalGoal(new FloatGoal(this), () -> !isFlyer()));
         this.goalSelector.addGoal(1, new ConditionalGoal(new PanicGoal(this, 1.4),
-                () -> behavior() == Behavior.PASSIVE));
+                () -> behavior() == Behavior.PASSIVE && !canFight()));
+        // Habilidades con su propio movimiento (creeper, rayo, grito sonico, embestida)
+        this.goalSelector.addGoal(1, new CreatureSwellGoal(this));
+        this.goalSelector.addGoal(1, new CreatureBeamGoal(this));
+        this.goalSelector.addGoal(1, new CreatureSonicBoomGoal(this));
+        this.goalSelector.addGoal(1, new CreatureChargeGoal(this));
+        this.goalSelector.addGoal(1, new ConditionalGoal(new BreakDoorGoal(this, difficulty -> true),
+                () -> doorMode() == DoorMode.BREAK));
+        // Por delante del ataque (como la arana y el creeper), si no el ataque no les deja moverse
+        this.goalSelector.addGoal(1, new ConditionalGoal(new LeapAtTargetGoal(this, 0.4f),
+                () -> canFight() && ability(a -> a.leap)));
+        this.goalSelector.addGoal(1, new CreatureFleeGoal(this));
+        this.goalSelector.addGoal(4, new ConditionalGoal(new OpenDoorGoal(this, true),
+                () -> doorMode() == DoorMode.OPEN));
         this.goalSelector.addGoal(2, new ConditionalGoal(new CreatureRangedGoal(this),
                 () -> canFight() && isRanged()));
         this.goalSelector.addGoal(2, new ConditionalGoal(new CreatureMeleeGoal(this, 1.2),
@@ -307,12 +380,38 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
 
         this.targetSelector.addGoal(1, new ConditionalGoal(new HurtByTargetGoal(this), this::canFight));
         this.targetSelector.addGoal(2, new ConditionalGoal(new CreatureTargetGoal(this, false),
-                () -> hostileNow() && !seesThroughWalls()));
+                () -> hostileNow() && !seesThroughWalls() && !blind()));
         this.targetSelector.addGoal(2, new ConditionalGoal(new CreatureTargetGoal(this, true),
-                () -> hostileNow() && seesThroughWalls()));
+                () -> hostileNow() && seesThroughWalls() && !blind()));
+        // Warden: ciega, encuentra a los jugadores por el ruido
+        this.targetSelector.addGoal(2, new HearingTargetGoal(this));
     }
 
-    private boolean hostileNow() {
+    private boolean ability(java.util.function.Predicate<com.creaturestudio.data.Abilities> test) {
+        CreatureDefinition d = def();
+        return d != null && test.test(d.abilities);
+    }
+
+    private DoorMode doorMode() {
+        CreatureDefinition d = def();
+        return d == null || isFlyer() ? DoorMode.NONE : d.abilities.doors;
+    }
+
+    /** Creeper y gatos: huye de los mobs de ese tipo (o de las criaturas propias con ese id). */
+    boolean fears(LivingEntity other) {
+        CreatureDefinition d = def();
+        if (d == null || !d.abilities.fear || other == this || this.distanceTo(other) > d.abilities.fearRange) {
+            return false;
+        }
+        String id = d.abilities.fearEntity;
+        if (other instanceof CustomCreature c && !id.contains(":")) {
+            return c.getCreatureId().equals(id);
+        }
+        String type = BuiltInRegistries.ENTITY_TYPE.getKey(other.getType()).toString();
+        return type.equals(id.contains(":") ? id : "minecraft:" + id);
+    }
+
+    boolean hostileNow() {
         return behavior() == Behavior.HOSTILE && this.level().getDifficulty() != Difficulty.PEACEFUL;
     }
 
@@ -400,11 +499,12 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     @Override
     public boolean doHurtTarget(Entity target) {
         boolean hit = super.doHurtTarget(target);
-        if (hit && target instanceof LivingEntity living) {
-            CreatureDefinition d = def();
-            if (d != null) {
+        CreatureDefinition d = def();
+        if (hit && d != null) {
+            if (target instanceof LivingEntity living) {
                 HitEffects.apply(d.hitEffect, living, this);
             }
+            abilities.afterAttack(d, target);
         }
         return hit;
     }
@@ -416,14 +516,22 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     @Override
     public boolean hurt(DamageSource source, float amount) {
         CreatureDefinition d = def();
+        boolean server = !this.level().isClientSide();
         if (d != null && !source.is(DamageTypeTags.BYPASSES_INVULNERABILITY)) {
+            if (server && !this.isInvulnerableTo(source) && abilities.dodge(d, source)) {
+                return false; // enderman: se teletransporta antes de que llegue el proyectil
+            }
             float resist = resistance(d, source);
             if (resist >= 0.999f) {
                 return false;
             }
             amount *= 1f - resist;
         }
-        return super.hurt(source, amount);
+        boolean hurt = super.hurt(source, amount);
+        if (hurt && d != null && server) {
+            abilities.afterHurt(d, source);
+        }
+        return hurt;
     }
 
     /** Parte del dano (0-1) que se ahorra segun el tipo de ataque. */
@@ -444,7 +552,7 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     @Override
     public boolean causeFallDamage(float fallDistance, float multiplier, DamageSource source) {
         CreatureDefinition d = def();
-        if (isFlyer() || (d != null && d.noFallDamage)) {
+        if (isFlyer() || (d != null && (d.noFallDamage || d.abilities.slowFall))) {
             return false;
         }
         return super.causeFallDamage(fallDistance, multiplier, source);
@@ -483,8 +591,33 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
 
     @Override
     public void tick() {
+        CreatureDefinition before = def();
+        if (this.isAlive() && before != null && before.abilities.explode) {
+            tickSwell(before);
+        } else {
+            this.oldSwell = this.swell;
+        }
         super.tick();
         CreatureDefinition d = def();
+        if (this.level().isClientSide()) {
+            this.clientBeamTime = getBeamTarget() != 0 ? this.clientBeamTime + 1 : 0;
+        } else {
+            if (this.explodeCooldown > 0) {
+                this.explodeCooldown--;
+            }
+            if (this.beamCooldown > 0) {
+                this.beamCooldown--;
+            }
+            if (this.sonicCooldown > 0) {
+                this.sonicCooldown--;
+            }
+            if (this.chargeCooldown > 0) {
+                this.chargeCooldown--;
+            }
+            if (this.milkTimer > 0) {
+                this.milkTimer--;
+            }
+        }
         if (!this.level().isClientSide()) {
             if (d == null) {
                 String id = getCreatureId();
@@ -517,6 +650,9 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
                 }
                 regenerate(d);
                 updateShield(d);
+                if (this.level() instanceof ServerLevel level) {
+                    abilities.serverTick(d, level);
+                }
             }
         }
         super.aiStep();
@@ -537,12 +673,39 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
 
     @Override
     public void die(DamageSource source) {
+        boolean wasDead = this.dead;
         super.die(source);
-        if (!(this.level() instanceof ServerLevel level)) {
+        // Solo la primera vez que muere de verdad (otro mod puede cancelar la muerte)
+        if (wasDead || !this.dead || !(this.level() instanceof ServerLevel level)) {
             return;
         }
         CreatureDefinition d = def();
-        if (d == null || !d.respawn || (d.respawnLimit > 0 && this.respawnsUsed >= d.respawnLimit)) {
+        if (d == null) {
+            return;
+        }
+        if (d.abilities.split && !this.exploded && this.generation < d.abilities.splitGenerations) {
+            splitInto(level, d);
+        }
+        scheduleRespawn(level, d);
+    }
+
+    /** Slime: se divide en pedazos mas pequenos. */
+    private void splitInto(ServerLevel level, CreatureDefinition d) {
+        int n = d.abilities.splitCount;
+        float w = this.getBbWidth();
+        for (int i = 0; i < n; i++) {
+            double ox = ((i % 2) - 0.5) * w * 0.5;
+            double oz = ((i / 2) - 0.5) * w * 0.5;
+            spawnChild(level, d, this.getX() + ox, this.getY() + 0.5, this.getZ() + oz,
+                    this.getRandom().nextFloat() * 360.0f, this.generation + 1, this.summoned,
+                    this.isPersistenceRequired());
+        }
+    }
+
+    /** Programa la reaparicion (solo la original: ni los pedazos ni las invocadas). */
+    private void scheduleRespawn(ServerLevel level, CreatureDefinition d) {
+        if (this.generation > 0 || this.summoned || !d.respawn
+                || (d.respawnLimit > 0 && this.respawnsUsed >= d.respawnLimit)) {
             return;
         }
         boolean home = d.respawnAtHome && this.hasHome;
@@ -587,6 +750,8 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         super.onSyncedDataUpdated(key);
         if (DATA_CREATURE_ID.equals(key)) {
             this.refreshDimensions();
+        } else if (DATA_BEAM_TARGET.equals(key)) {
+            this.clientBeamTime = 0;
         }
     }
 
@@ -624,6 +789,165 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
                 count -= n;
             }
         }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Habilidades
+    // ---------------------------------------------------------------------------------------
+
+    public int getSwellDir() {
+        return this.entityData.get(DATA_SWELL_DIR);
+    }
+
+    void setSwellDir(int dir) {
+        this.entityData.set(DATA_SWELL_DIR, dir);
+    }
+
+    /** Creeper: cuanto se ha hinchado (0 a 1) para el dibujado. */
+    public float getSwelling(float partialTick) {
+        CreatureDefinition d = def();
+        int fuse = d == null ? 30 : d.abilities.explodeFuse;
+        return Mth.lerp(partialTick, (float) this.oldSwell, (float) this.swell) / Math.max(1, fuse - 2);
+    }
+
+    private void tickSwell(CreatureDefinition d) {
+        this.oldSwell = this.swell;
+        int dir = getSwellDir();
+        if (dir > 0 && this.swell == 0 && !this.level().isClientSide()) {
+            playSoundId("entity.creeper.primed", 1.0f, 0.5f);
+        }
+        this.swell += dir;
+        if (this.swell < 0) {
+            this.swell = 0;
+        }
+        int fuse = d.abilities.explodeFuse;
+        if (this.swell >= fuse) {
+            this.swell = fuse;
+            if (this.level() instanceof ServerLevel level) {
+                explodeNow(level, d);
+            }
+        }
+    }
+
+    private void explodeNow(ServerLevel level, CreatureDefinition d) {
+        float power = switch (d.abilities.explodeSize) {
+            case SMALL -> 2.0f;
+            case BIG -> 5.0f;
+            default -> 3.0f; // como un creeper
+        };
+        level.explode(this, this.getX(), this.getY(), this.getZ(), power, Level.ExplosionInteraction.MOB);
+        if (d.abilities.explodeDies) {
+            this.exploded = true;
+            scheduleRespawn(level, d);
+            this.discard();
+        } else {
+            this.swell = 0;
+            this.oldSwell = 0;
+            setSwellDir(-1);
+            this.explodeCooldown = d.abilities.explodeCooldown * 20;
+        }
+    }
+
+    /** A quien hace "sss": su objetivo si esta cerca o, si no, el jugador mas cercano que se acerque. */
+    @Nullable
+    LivingEntity swellTrigger(CreatureDefinition d) {
+        float r = d.abilities.explodeRange;
+        LivingEntity t = this.getTarget();
+        if (t != null && t.isAlive() && this.distanceToSqr(t) <= r * r && this.getSensing().hasLineOfSight(t)) {
+            return t;
+        }
+        return this.level().getNearestPlayer(TargetingConditions.forCombat().range(r), this);
+    }
+
+    public int getBeamTarget() {
+        return this.entityData.get(DATA_BEAM_TARGET);
+    }
+
+    void setBeamTarget(int id) {
+        this.entityData.set(DATA_BEAM_TARGET, id);
+    }
+
+    /** Guardian: carga del rayo de 0 a 1 (en el cliente). */
+    public float getBeamProgress(float partialTick) {
+        CreatureDefinition d = def();
+        int charge = d == null ? 60 : d.abilities.beamCharge;
+        return Mth.clamp((this.clientBeamTime + partialTick) / charge, 0.0f, 1.0f);
+    }
+
+    /** Ticks que lleva el rayo encendido (en el cliente, para animar la textura). */
+    public float getBeamTime(float partialTick) {
+        return this.clientBeamTime + partialTick;
+    }
+
+    boolean isSummoned() {
+        return this.summoned;
+    }
+
+    void playSoundId(String id, float volume, float pitch) {
+        SoundEvent sound = soundById(id);
+        if (sound != null && !this.isSilent()) {
+            this.playSound(sound, volume, pitch);
+        }
+    }
+
+    /** Arana: trepa cuando choca con una pared. */
+    @Override
+    public boolean onClimbable() {
+        CreatureDefinition d = def();
+        if (d != null && d.abilities.climb && !isFlyer() && this.horizontalCollision) {
+            return true;
+        }
+        return super.onClimbable();
+    }
+
+    /** Breeze: devuelve los proyectiles (la misma decision en el cliente y en el servidor). */
+    @Override
+    public ProjectileDeflection deflection(Projectile projectile) {
+        CreatureDefinition d = def();
+        if (d != null && d.abilities.deflect
+                && Math.floorMod(projectile.getUUID().hashCode(), 100) < d.abilities.deflectChance) {
+            if (!this.level().isClientSide()) {
+                playSoundId("entity.breeze.deflect", 1.0f, 1.0f);
+            }
+            return ProjectileDeflection.REVERSE;
+        }
+        return super.deflection(projectile);
+    }
+
+    /** Vaca: tocarla con un objeto da otro (cubo -> cubo de leche). */
+    @Override
+    public InteractionResult mobInteract(Player player, InteractionHand hand) {
+        CreatureDefinition d = def();
+        ItemStack held = player.getItemInHand(hand);
+        if (d != null && d.abilities.milkable && !held.isEmpty() && !d.abilities.milkWith.isEmpty()
+                && BuiltInRegistries.ITEM.getKey(held.getItem()).toString().equals(d.abilities.milkWith)) {
+            ItemStack result = stackOf(d.abilities.milkGives);
+            if (result.isEmpty()) {
+                return super.mobInteract(player, hand);
+            }
+            if (!this.level().isClientSide()) {
+                if (this.milkTimer > 0) {
+                    return InteractionResult.PASS;
+                }
+                SoundEvent sound = soundById("entity.cow.milk");
+                if (sound != null) {
+                    player.playSound(sound, 1.0f, 1.0f);
+                }
+                if (d.abilities.milkUsesItem) {
+                    player.setItemInHand(hand, ItemUtils.createFilledResult(held, player, result));
+                } else {
+                    if (!player.getInventory().add(result)) {
+                        player.drop(result, false);
+                    }
+                    if (held.isDamageableItem()) {
+                        held.hurtAndBreak(1, player, LivingEntity.getSlotForHand(hand));
+                    }
+                }
+                this.milkTimer = d.abilities.milkCooldown * 20;
+            }
+            return InteractionResult.sidedSuccess(this.level().isClientSide());
+        }
+        return super.mobInteract(player, hand);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -681,6 +1005,15 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
             tag.putDouble("HomeZ", this.homeZ);
         }
         tag.putInt("RespawnsUsed", this.respawnsUsed);
+        if (this.generation > 0) {
+            tag.putInt("Generation", this.generation);
+        }
+        if (this.summoned) {
+            tag.putBoolean("Summoned", true);
+        }
+        if (abilities.layTimer >= 0) {
+            tag.putInt("LayTime", abilities.layTimer);
+        }
     }
 
     @Override
@@ -690,6 +1023,9 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
             setHome(tag.getDouble("HomeX"), tag.getDouble("HomeY"), tag.getDouble("HomeZ"));
         }
         this.respawnsUsed = tag.getInt("RespawnsUsed");
+        this.generation = Math.max(0, Math.min(3, tag.getInt("Generation")));
+        this.summoned = tag.getBoolean("Summoned");
+        abilities.layTimer = tag.contains("LayTime") ? tag.getInt("LayTime") : -1;
         if (tag.contains("CreatureId")) {
             this.entityData.set(DATA_CREATURE_ID, tag.getString("CreatureId"));
             if (!this.level().isClientSide()) {
@@ -702,10 +1038,19 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     @Nullable
     public static CustomCreature spawn(ServerLevel level, CreatureDefinition d, double x, double y, double z,
                                        float yaw, boolean persistent) {
+        return spawnChild(level, d, x, y, z, yaw, 0, false, persistent);
+    }
+
+    /** Como {@link #spawn}, para los pedazos de un slime (generation mayor que 0) y las criaturas invocadas. */
+    @Nullable
+    public static CustomCreature spawnChild(ServerLevel level, CreatureDefinition d, double x, double y, double z,
+                                            float yaw, int generation, boolean summoned, boolean persistent) {
         CustomCreature creature = ModRegistry.CUSTOM_CREATURE.get().create(level);
         if (creature == null) {
             return null;
         }
+        creature.generation = generation;
+        creature.summoned = summoned;
         creature.moveTo(x, y, z, yaw, 0.0f);
         creature.yHeadRot = yaw;
         creature.yBodyRot = yaw;

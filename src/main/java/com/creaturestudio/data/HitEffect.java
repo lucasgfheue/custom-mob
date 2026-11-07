@@ -15,7 +15,8 @@ public enum HitEffect {
     NAUSEA,
     HUNGER,
     GLOWING,
-    DARKNESS;
+    DARKNESS,
+    MINING_FATIGUE;
 
     public String key() {
         return name().toLowerCase(Locale.ROOT);

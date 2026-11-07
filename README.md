@@ -7,7 +7,7 @@ También puedes partir del modelo de cualquier mob de Minecraft y modificarlo.
 ## Características
 
 La **vista 3D ocupa casi toda la pantalla** (como en AutoCAD). A la derecha hay un panel estrecho con una
-fila de **pestañas con iconos** (pasa el ratón por encima para ver su nombre; teclas 1 a 9 y 0 para la décima):
+fila de **pestañas con iconos** (pasa el ratón por encima para ver su nombre; teclas 1 a 9 y 0 para las diez primeras):
 
 - **H** oculta o muestra el panel (o el botón **»** a la izquierda de las pestañas) para dibujar con toda la pantalla.
 - Arrastra el **borde izquierdo del panel** para hacerlo más ancho o más estrecho (se recuerda).
@@ -19,11 +19,12 @@ fila de **pestañas con iconos** (pasa el ratón por encima para ver su nombre; 
 | **Cuerpo** | **Partes del cuerpo ya hechas** (cuerpo de 2 o 4 patas, cabeza, ojos, orejas, cuernos, hocico, antenas, brazos, piernas, patas de araña, cola, alas y aletas): con un clic aparecen colocadas, unidas y animadas. Después, botones para hacerlas más grandes o pequeñas, más anchas, altas o largas, moverlas, y cambiar color y textura, con **simetría** (izquierda y derecha a la vez). |
 | **Piezas** | Árbol con todos los cubos (hasta 128). Añadir, duplicar, espejar en X, borrar, centrar; nombre y «unida a» (jerarquía). |
 | **Forma** | Posición, tamaño, pivote y giro en X/Y/Z (16 píxeles = 1 bloque). |
-| **Pintar** | **Importar/exportar skins PNG**, pintura píxel a píxel (pincel, borrador, gotero, grosor y color), color base con selector HSV y más de 60 texturas (propias y de bloques de Minecraft). |
+| **Pintar** | Dos modos: **pintar píxeles** (importar/exportar skins PNG, pincel, goma, gotero, grosor y color) o **minibloques**: cubitos de un píxel pegados a las piezas para construir cascos, armaduras, coronas... (poner, goma, gotero, pintar encima, espejo y 10 accesorios listos: casco, corona, cuernos, aureola, barba, pechera, cinturón, capa, hombrera y botas). Además, color base con selector HSV y más de 60 texturas. |
 | **Animar** | 15 movimientos: cabeza, piernas, brazos, patas de araña, alas, cola, rebote, mandíbula, giro y balanceo. |
 | **Atributos** | Vida, velocidad, armadura, escala y experiencia, y por apartados: **Respawn** (si reaparece al morir, a qué hora, tras cuántos segundos, dónde y cuántas veces), **Melee** (fuerza, alcance, velocidad, empuje y efecto), **Ranged** (puntería, disparos, alcance, cuándo pasa a melee, esperas, ráfagas, sonidos al disparar, acertar y chocar, apuntar quieta y disparo en arco), **Tipo de proyectil** (aspecto, fuerza, tamaño, velocidad, gravedad constante o que acelera, explosión, efecto, estela, brillo, empuje, 3D que gira y se clava o 2D), **Resistencia** (empuje, flechas, cuerpo a cuerpo y explosiones en %), **Regeneración** (normal y en combate), **Rango de visión** (visión, a través de paredes y persecución) y **Otros** (ahogarse, daño por caída, telarañas, pociones, fuego y sol). |
 | **Inventario** | Lo que lleva puesto: casco, pechera, pantalones, botas, mano derecha, mano izquierda, escudo (lo sube al acercarse el enemigo) y proyectil, con la probabilidad de soltarlo; y el **botín al morir**: hasta 10 objetos distintos, cada uno con su cantidad y su probabilidad. Cada hueco tiene un buscador con todos los objetos del juego. |
 | **Conducta** | Pasiva, neutral u hostil; camina o vuela; 27 sonidos; ítem que la atrae. |
+| **Habilidades** | Poderes de los mobs de Minecraft, cada uno con sus ajustes: creeper (explota si te acercas: pequeña, mediana o grande), warden (no ve pero oye; grito sónico), enderman (se teletransporta; se enoja si lo miras), guardián (rayo; espinas), guardián anciano (aura con efecto), slime (se divide), araña (trepa paredes; salta), gólem de hierro (lanza por los aires), bruja (se cura), invocador (invoca ayudantes), devastador (embestida), lobo (manada), calamar (tinta), breeze (rebota proyectiles), gallina (cae despacio; pone huevos), vaca (se ordeña), zombi/aldeano (abre o rompe puertas), gólem de nieve (deja rastro), calamar luminoso (brilla), zorro (recoge objetos) y miedo a otro mob. |
 | **Aparición** | Aparición natural (horario, biomas, probabilidad) y colores del huevo. |
 
 **Modo fácil** (botón «Modo fácil» arriba): deja solo las pestañas **Cuerpo**, **Plantillas** y **Pintar**, para
@@ -56,7 +57,7 @@ montar una criatura pieza a pieza sin tocar números. Pulsa otra vez para volver
 4. Ve a la pestaña **Actions**. La compilación empieza sola (o pulsa **Run workflow**). Tarda unos 5–10 minutos
    la primera vez porque descarga y prepara Minecraft.
 5. Cuando aparezca el círculo verde ✔, entra en la ejecución y descarga el artefacto
-   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.2.0.jar`.
+   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.3.0.jar`.
 
 Para compilar en tu PC: instala Java 21 y ejecuta `gradlew build` (Windows) o `./gradlew build` (Linux/Mac).
 El `.jar` queda en `build/libs/`.
@@ -143,6 +144,10 @@ src/main/resources/        Texturas, modelos, idiomas (es/en), receta y botín
   su tiempo de espera, a la hora elegida y con la zona cargada (cerca de algún jugador).
 - **No suelta su armadura o su arma**: como los mobs de Minecraft, el equipo solo cae si la mata un jugador
   (y según su probabilidad). El botín de la lista cae siempre que se cumpla su probabilidad.
+- **La criatura no explota / no deja rastro de nieve o fuego / no rompe puertas**: esas habilidades cambian bloques
+  y solo funcionan con la regla `mobGriefing` activada (como en Minecraft). La explosión daña igual aunque no rompa.
+- **El warden no me encuentra**: solo busca jugadores si su conducta es **Hostil**, y no oye a quien va agachado y quieto.
+- **No veo las herramientas de minibloques**: pestaña **Pintar** → «Minibloques» → **Usar el ratón**.
 - **Las criaturas de antes de la versión 1.2.0**: se abren igual. Su botín pasa a la lista del Inventario y su
   tipo de disparo recibe los valores típicos del proyectil.
 - **La skin no encaja**: la imagen tiene que tener el formato del modelo que cargaste (por ejemplo, una skin de

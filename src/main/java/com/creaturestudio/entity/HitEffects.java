@@ -25,6 +25,28 @@ public final class HitEffects {
             case HUNGER -> target.addEffect(new MobEffectInstance(MobEffects.HUNGER, 200, 0), source);
             case GLOWING -> target.addEffect(new MobEffectInstance(MobEffects.GLOWING, 200, 0), source);
             case DARKNESS -> target.addEffect(new MobEffectInstance(MobEffects.DARKNESS, 120, 0), source);
+            case MINING_FATIGUE -> target.addEffect(new MobEffectInstance(MobEffects.DIG_SLOWDOWN, 200, 1), source);
+            default -> {
+            }
+        }
+    }
+
+    /** Igual que {@link #apply}, pero con la duracion indicada (en ticks), para el aura. */
+    public static void applyFor(HitEffect effect, LivingEntity target, @Nullable Entity source, int ticks) {
+        int t = Math.max(1, ticks);
+        switch (effect) {
+            case POISON -> target.addEffect(new MobEffectInstance(MobEffects.POISON, t, 0), source);
+            case WITHER -> target.addEffect(new MobEffectInstance(MobEffects.WITHER, t, 0), source);
+            case SLOWNESS -> target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, t, 1), source);
+            case WEAKNESS -> target.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, t, 0), source);
+            case FIRE -> target.igniteForSeconds(Math.max(1f, t / 20f));
+            case LEVITATION -> target.addEffect(new MobEffectInstance(MobEffects.LEVITATION, t, 0), source);
+            case BLINDNESS -> target.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, t, 0), source);
+            case NAUSEA -> target.addEffect(new MobEffectInstance(MobEffects.CONFUSION, t, 0), source);
+            case HUNGER -> target.addEffect(new MobEffectInstance(MobEffects.HUNGER, t, 0), source);
+            case GLOWING -> target.addEffect(new MobEffectInstance(MobEffects.GLOWING, t, 0), source);
+            case DARKNESS -> target.addEffect(new MobEffectInstance(MobEffects.DARKNESS, t, 0), source);
+            case MINING_FATIGUE -> target.addEffect(new MobEffectInstance(MobEffects.DIG_SLOWDOWN, t, 2), source);
             default -> {
             }
         }

@@ -52,6 +52,12 @@ public class CreaturePart {
     public int uvH;
     public int uvD;
 
+    /**
+     * Minibloques pegados a la pieza (ver {@link Voxels}): pares {posicion, color}, o null si no tiene.
+     * Se mueven y se animan con la pieza.
+     */
+    public int[] voxels;
+
     /** Tamano de la pieza en la skin (texels de ancho, alto y fondo; 0 en piezas planas como las aletas). */
     public boolean hasUv() {
         if (uvU < 0 || uvV < 0 || uvW < 0 || uvH < 0 || uvD < 0
@@ -107,6 +113,7 @@ public class CreaturePart {
         c.uvW = uvW;
         c.uvH = uvH;
         c.uvD = uvD;
+        c.voxels = voxels == null ? null : voxels.clone();
         return c;
     }
 
@@ -123,6 +130,7 @@ public class CreaturePart {
             c.paint = mirroredPaint();
         }
         c.uvMirror = !uvMirror;
+        c.voxels = Voxels.mirrorX(voxels, w);
         return c;
     }
 

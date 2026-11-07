@@ -139,6 +139,7 @@ public final class CreatureJson {
         equip.addProperty("shield", d.equipShield);
         equip.addProperty("dropChance", d.equipDropChance);
         o.add("equipment", equip);
+        o.add("abilities", d.abilities.toJson());
 
         JsonArray drops = new JsonArray();
         for (CreatureDrop drop : d.drops) {
@@ -197,6 +198,9 @@ public final class CreatureJson {
                 size.add(p.pd);
                 j.add("paintSize", size);
                 j.addProperty("paint", encodePaint(p.paint));
+            }
+            if (Voxels.count(p.voxels) > 0) {
+                j.addProperty("voxels", Voxels.encode(p.voxels));
             }
             parts.add(j);
         }
@@ -338,6 +342,9 @@ public final class CreatureJson {
             d.potionImmune = bool(flags, "potionImmune", false);
         }
 
+        JsonObject abilities = obj(o, "abilities");
+        d.abilities = abilities != null ? Abilities.fromJson(abilities) : new Abilities();
+
         JsonObject equip = obj(o, "equipment");
         if (equip != null) {
             d.equipHead = str(equip, "head", "");
@@ -410,6 +417,9 @@ public final class CreatureJson {
                 p.animSpeed = num(j, "animSpeed", 1f);
                 readPaint(j, p);
                 readUv(j, p);
+                if (j.has("voxels") && j.get("voxels").isJsonPrimitive()) {
+                    p.voxels = Voxels.decode(j.get("voxels").getAsString());
+                }
                 d.parts.add(p);
             }
         }

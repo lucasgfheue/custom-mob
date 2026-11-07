@@ -8,16 +8,22 @@ import com.creaturestudio.client.render.AnimState;
 import com.creaturestudio.client.render.CreatureModelRenderer;
 import com.creaturestudio.client.render.PaintAtlas;
 import com.creaturestudio.client.render.Materials;
+import com.creaturestudio.data.Abilities;
 import com.creaturestudio.data.Behavior;
 import com.creaturestudio.data.CreatureDrop;
+import com.creaturestudio.data.DoorMode;
 import com.creaturestudio.data.ExplosionSize;
 import com.creaturestudio.data.IndirectFire;
 import com.creaturestudio.data.RangedPresets;
 import com.creaturestudio.data.ShotSound;
+import com.creaturestudio.data.TrailBlock;
+import com.creaturestudio.data.VoxelTemplate;
+import com.creaturestudio.data.Voxels;
 import com.creaturestudio.data.TrailType;
 import com.creaturestudio.data.BodyParts;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureJson;
+import com.creaturestudio.data.CreatureStore;
 import com.creaturestudio.data.CreaturePart;
 import com.creaturestudio.data.DefCodec;
 import com.creaturestudio.data.HitEffect;
@@ -50,6 +56,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -93,6 +101,7 @@ public class EditorScreen extends Screen {
         STATS("stats"),
         INVENTORY("inventory"),
         BEHAVIOR("behavior"),
+        ABILITIES("abilities"),
         SPAWN("spawn");
 
         private final String key;
@@ -128,6 +137,7 @@ public class EditorScreen extends Screen {
                     case STATS -> Items.GOLDEN_APPLE;
                     case INVENTORY -> Items.CHEST;
                     case BEHAVIOR -> Items.IRON_SWORD;
+                    case ABILITIES -> Items.NETHER_STAR;
                     case SPAWN -> Items.GRASS_BLOCK;
                 });
             }
@@ -166,7 +176,7 @@ public class EditorScreen extends Screen {
     /** Pestanas que se ven en el modo facil y en el completo, en orden (teclas 1, 2, 3...). */
     private static final Tab[] EASY_TABS = {Tab.EASY, Tab.TEMPLATE, Tab.PAINT};
     private static final Tab[] FULL_TABS = {Tab.TEMPLATE, Tab.EASY, Tab.PARTS, Tab.SHAPE, Tab.PAINT, Tab.ANIMATE,
-            Tab.STATS, Tab.INVENTORY, Tab.BEHAVIOR, Tab.SPAWN};
+            Tab.STATS, Tab.INVENTORY, Tab.BEHAVIOR, Tab.ABILITIES, Tab.SPAWN};
     /** Opciones Si/No para los grupos de botones. */
     private static final Boolean[] NO_YES = {Boolean.FALSE, Boolean.TRUE};
     private static final Boolean[] YES_NO = {Boolean.TRUE, Boolean.FALSE};
@@ -187,7 +197,7 @@ public class EditorScreen extends Screen {
     private static final int STRIP_CELL = 20;
     /** Boton de plegar el panel, a la izquierda de la fila de pestanas. */
     private static final int FOLD_W = 12;
-    private static final int MIN_PANEL = 175;
+    private static final int MIN_PANEL = 190;
     private static final int PAD = 6;
     private static final int SCROLLBAR = 4;
     private static final int ROW = 18;
@@ -301,6 +311,14 @@ public class EditorScreen extends Screen {
     private CreaturePart gizmoStart;
     private boolean painting;
     private boolean strokeChanged;
+    /** Pestana Pintar: true = se dibuja con minibloques en vez de pintar pixeles. */
+    private boolean voxelMode;
+    /** Minibloques: poner tambien en el otro lado (espejo). */
+    private boolean voxelMirror = true;
+    /** Minibloques: el pincel cambia el color de los que ya hay en vez de poner nuevos. */
+    private boolean voxelRecolor;
+    /** Minibloques puestos en el trazo actual (no cuentan al apuntar, asi se pinta una capa). */
+    private final java.util.Set<Long> strokeVoxels = new java.util.HashSet<>();
     private double paintLastX;
     private double paintLastY;
 
@@ -403,10 +421,11 @@ public class EditorScreen extends Screen {
         if (panelCollapsed) {
             panelW = STRIP_W;
         } else {
-            int auto = Mth.clamp(width * 3 / 10, 180, 240);
+            int auto = Mth.clamp(width * 3 / 10, MIN_PANEL, 240);
             panelW = Mth.clamp(EditorSettings.panelWidth > 0 ? EditorSettings.panelWidth : auto, MIN_PANEL, maxPanel());
         }
         panelX = width - panelW;
+        buildIndent = 0;
         contentW = panelW - PAD * 2 - SCROLLBAR;
         viewTop = HEADER_H + TAB_H + TITLE_H;
         viewBottom = height;
@@ -441,6 +460,7 @@ public class EditorScreen extends Screen {
             case STATS -> buildStatsTab(y);
             case INVENTORY -> buildInventoryTab(y);
             case BEHAVIOR -> buildBehaviorTab(y);
+            case ABILITIES -> buildAbilitiesTab(y);
             case SPAWN -> buildSpawnTab(y);
         };
         contentHeight = bottom + PAD;
@@ -826,7 +846,22 @@ public class EditorScreen extends Screen {
             return noParts(y);
         }
         y = pieceSelector(y);
+        y = smallLabel(y, Ui.tr("paint.mode"));
+        y = chips(y, NO_YES, 2, () -> voxelMode, v -> {
+            voxelMode = v;
+            endMouseAction();
+            requestRebuild();
+        }, v -> Ui.tr(v ? "paint.mode.voxels" : "paint.mode.pixels"),
+                v -> Ui.tr(v ? "paint.mode.voxels_tip" : "paint.mode.pixels_tip")) + 6;
+        if (voxelMode) {
+            y = buildVoxelSection(y, p);
+        } else {
+            y = buildPixelSection(y, p);
+        }
+        return buildPartLook(y, p);
+    }
 
+    private int buildPixelSection(int y, CreaturePart p) {
         y = section(y, Ui.tr("skin.section"));
         int halfS = (contentW - GAP) / 2;
         button(0, y, halfS, Ui.tr("skin.import"), b -> openSkinPicker(), Ui.tr("skin.import_tip"));
@@ -868,8 +903,11 @@ public class EditorScreen extends Screen {
         button(halfW + GAP, y, contentW - halfW - GAP, Ui.tr("paint.clear_all"), b -> clearAllPaint(),
                 Ui.tr("paint.clear_all_tip"));
         y += ROW + 4;
-        y = text(y, Ui.tr("paint.hint"), HINT) + 10;
+        return text(y, Ui.tr("paint.hint"), HINT) + 10;
+    }
 
+    /** Color de la pieza y su textura (en los dos modos de la pestana Pintar). */
+    private int buildPartLook(int y, CreaturePart p) {
         IntConsumer setColor = c -> {
             p.color = c & 0xFFFFFF;
             markChanged();
@@ -908,6 +946,249 @@ public class EditorScreen extends Screen {
         material.setTextColor(Materials.exists(p.material) ? Ui.TEXT : Ui.ERROR);
         y += ROW + 4;
         return text(y, Ui.tr("editor.hint.look"), HINT);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Minibloques
+    // ---------------------------------------------------------------------------------------
+
+    private int buildVoxelSection(int y, CreaturePart p) {
+        y = section(y, Ui.tr("voxel.section"));
+        if (!mouseMode) {
+            y = text(y, Ui.tr("voxel.mouse_off"), Ui.ACCENT) + 4;
+            button(0, y, Math.min(contentW, 150), Ui.tr("tool.enable"), b -> setTool(Tool.BRUSH), null);
+            y += ROW + 6;
+        } else {
+            y = chips(y, PAINT_TOOLS, PAINT_TOOLS.length, () -> tool, this::setTool, Tool::title,
+                    t -> Ui.tr("voxel.tool." + t.key + ".help")) + 4;
+            y = text(y, Ui.tr("voxel.tool." + tool.key + ".help"), HINT) + 6;
+        }
+        y = smallLabel(y, Ui.tr("voxel.brush_does"));
+        y = chips(y, NO_YES, 2, () -> voxelRecolor, v -> voxelRecolor = v,
+                v -> Ui.tr(v ? "voxel.recolor" : "voxel.place"), v -> Ui.tr(v ? "voxel.recolor_tip" : "voxel.place_tip")) + 4;
+        add(new Toggle(0, y, contentW, Ui.tr("voxel.mirror"), () -> voxelMirror, v -> voxelMirror = v,
+                Ui.tr("voxel.mirror_tip"), false));
+        y += CHIP_H + 6;
+        y = smallLabel(y, Ui.tr("voxel.color"));
+        IntSupplier brush = () -> brushColor & 0xFFFFFF;
+        IntConsumer setBrush = c -> {
+            brushColor = 0xFF000000 | (c & 0xFFFFFF);
+            refreshFields();
+        };
+        add(new ColorPicker(0, y, contentW, 46, brush, setBrush));
+        y += 46 + 5;
+        add(new Swatch(0, y, FIELD_H, brush));
+        hexBox(FIELD_H + 4, y, 58, brush, setBrush);
+        y += ROW;
+        Palette palette = add(new Palette(0, y, contentW, brush, setBrush));
+        y += palette.h + 8;
+
+        y = section(y, Ui.tr("voxel.templates"));
+        y = text(y, Ui.tr("voxel.templates_hint", p.name), HINT) + 3;
+        VoxelTemplate[] all = VoxelTemplate.values();
+        int half = (contentW - GAP) / 2;
+        for (int i = 0; i < all.length; i++) {
+            VoxelTemplate t = all[i];
+            boolean left = i % 2 == 0;
+            button(left ? 0 : half + GAP, y, left ? half : contentW - half - GAP, Ui.tr("voxel.template." + t.key()),
+                    b -> applyTemplate(t), Ui.tr("voxel.template." + t.key() + ".tip"));
+            if (!left || i == all.length - 1) {
+                y += ROW;
+            }
+        }
+        y += 4;
+        button(0, y, half, Ui.tr("voxel.clear_part"), b -> {
+            p.voxels = null;
+            markChanged();
+        }, Ui.tr("voxel.clear_part_tip"));
+        button(half + GAP, y, contentW - half - GAP, Ui.tr("voxel.clear_all"), b -> {
+            for (CreaturePart q : def.parts) {
+                q.voxels = null;
+            }
+            markChanged();
+        }, Ui.tr("voxel.clear_all_tip"));
+        y += ROW + 2;
+        add(new TextLine(0, y, () -> Ui.tr("voxel.count", Voxels.count(p.voxels), Voxels.total(def), Voxels.MAX_TOTAL),
+                Ui.MUTED));
+        y += 13;
+        return text(y, Ui.tr("voxel.hint"), HINT) + 10;
+    }
+
+    /** Pone un accesorio de minibloques en la pieza elegida (y en su pareja del otro lado si el espejo esta puesto). */
+    private void applyTemplate(VoxelTemplate t) {
+        CreaturePart p = sel();
+        if (p == null) {
+            return;
+        }
+        int rgb = brushColor & 0xFFFFFF;
+        int[] mine = t.build(p, rgb);
+        int partner = voxelMirror ? BodyParts.partner(def, selected) : -1;
+        int[] theirs = partner >= 0 ? t.build(def.parts.get(partner), rgb) : null;
+        int extra = Voxels.added(p.voxels, mine) + (theirs == null ? 0 : Voxels.added(def.parts.get(partner).voxels, theirs));
+        if (Voxels.total(def) + extra > Voxels.MAX_TOTAL) {
+            warn(Ui.tr("voxel.too_many", Voxels.MAX_TOTAL));
+            return;
+        }
+        p.voxels = Voxels.merge(p.voxels, mine);
+        if (theirs != null) {
+            CreaturePart q = def.parts.get(partner);
+            q.voxels = Voxels.merge(q.voxels, theirs);
+        }
+        markChanged();
+        showNotice(Ui.tr("voxel.template_done", Ui.tr("voxel.template." + t.key()), p.name), true);
+    }
+
+    /** Hueco de minibloque: pieza a la que se pega y posicion empaquetada. */
+    private record VoxelTarget(int part, int pos) {
+    }
+
+    /** Lo que hay bajo el raton para la herramienta: el hueco donde poner o el minibloque que borrar/pintar. */
+    @Nullable
+    private VoxelTarget voxelTarget(double mx, double my, Matrix4f[] mats) {
+        boolean existing = tool == Tool.ERASER || voxelRecolor;
+        Preview3D.Hit hit = preview.pickHit(def, mats, mx, my, existing ? null : strokeVoxels, existing);
+        if (hit == null || hit.part() >= def.parts.size()) {
+            return null;
+        }
+        if (existing) {
+            return hit.isVoxel() ? new VoxelTarget(hit.part(), hit.voxel()) : null;
+        }
+        if (hit.face() < 0) {
+            return null;
+        }
+        int[] n = Voxels.NORMALS[hit.face()];
+        CreaturePart p = def.parts.get(hit.part());
+        int x;
+        int y;
+        int z;
+        if (hit.isVoxel()) {
+            x = Voxels.x(hit.voxel()) + n[0];
+            y = Voxels.y(hit.voxel()) + n[1];
+            z = Voxels.z(hit.voxel()) + n[2];
+        } else {
+            x = cell(hit.x() - p.x, p.w, n[0]);
+            y = cell(hit.y() - p.y, p.h, n[1]);
+            z = cell(hit.z() - p.z, p.d, n[2]);
+        }
+        return Voxels.inRange(x, y, z) ? new VoxelTarget(hit.part(), Voxels.pack(x, y, z)) : null;
+    }
+
+    /** Coordenada del hueco pegado a la cara de la caja: fuera de la cara en su eje, la celda del punto en los otros. */
+    private static int cell(float r, float size, int normal) {
+        int cells = Math.max(1, (int) Math.ceil(size - 1.0e-3f));
+        if (normal > 0) {
+            return cells;
+        }
+        if (normal < 0) {
+            return -1;
+        }
+        return Mth.clamp((int) Math.floor(r), 0, cells - 1);
+    }
+
+    /** El mismo hueco al otro lado (en la misma pieza si esta centrada, o en su pareja). null si no tiene. */
+    @Nullable
+    private VoxelTarget mirrorTarget(VoxelTarget t) {
+        CreaturePart p = def.parts.get(t.part());
+        int qi;
+        if (Math.abs(p.x + p.w / 2f) < 0.05f) {
+            qi = t.part();
+        } else {
+            qi = BodyParts.partner(def, t.part());
+            if (qi < 0) {
+                return null;
+            }
+        }
+        CreaturePart q = def.parts.get(qi);
+        float fx = -(p.x + Voxels.x(t.pos()) + 1f) - q.x;
+        int x = Math.round(fx);
+        if (Math.abs(fx - x) > 0.05f) {
+            return null; // no cae en la rejilla del otro lado
+        }
+        int y = Math.round(p.y + Voxels.y(t.pos()) - q.y);
+        int z = Math.round(p.z + Voxels.z(t.pos()) - q.z);
+        return Voxels.inRange(x, y, z) ? new VoxelTarget(qi, Voxels.pack(x, y, z)) : null;
+    }
+
+    private void voxelAt(double mx, double my, Matrix4f[] mats) {
+        VoxelTarget t = voxelTarget(mx, my, mats);
+        if (t == null) {
+            return;
+        }
+        boolean changed = applyVoxel(t);
+        VoxelTarget m = voxelMirror ? mirrorTarget(t) : null;
+        if (m != null && !m.equals(t)) {
+            changed |= applyVoxel(m);
+        }
+        if (changed) {
+            strokeChanged = true;
+            dirty = true;
+        }
+    }
+
+    /** Pone, borra o pinta un minibloque segun la herramienta. true si algo cambio. */
+    private boolean applyVoxel(VoxelTarget t) {
+        CreaturePart p = def.parts.get(t.part());
+        int[] before = p.voxels;
+        if (tool == Tool.ERASER) {
+            p.voxels = Voxels.without(before, t.pos());
+            return p.voxels != before;
+        }
+        int rgb = brushColor & 0xFFFFFF;
+        boolean exists = Voxels.indexOf(before, t.pos()) >= 0;
+        if (voxelRecolor) {
+            if (!exists) {
+                return false;
+            }
+            p.voxels = Voxels.with(before, t.pos(), rgb);
+            return p.voxels != before;
+        }
+        strokeVoxels.add(Preview3D.voxelKey(t.part(), t.pos()));
+        if (exists) {
+            return false;
+        }
+        if (Voxels.total(def) >= Voxels.MAX_TOTAL) {
+            warn(Ui.tr("voxel.too_many", Voxels.MAX_TOTAL));
+            return false;
+        }
+        p.voxels = Voxels.with(before, t.pos(), rgb);
+        return true;
+    }
+
+    /** Cuentagotas de los minibloques: el color del minibloque (o de la pieza) bajo el raton. */
+    private boolean pickVoxelColor(double mx, double my, Matrix4f[] mats) {
+        Preview3D.Hit hit = preview.pickHit(def, mats, mx, my, null, false);
+        if (hit == null) {
+            return false;
+        }
+        if (!hit.isVoxel()) {
+            return pickColor(mx, my, mats);
+        }
+        CreaturePart p = def.parts.get(hit.part());
+        int i = Voxels.indexOf(p.voxels, hit.voxel());
+        if (i < 0) {
+            return false;
+        }
+        brushColor = 0xFF000000 | Voxels.colorAt(p.voxels, i);
+        showNotice(Ui.tr("tool.picked", CreatureJson.hex(brushColor)), true);
+        voxelRecolor = false;
+        setTool(Tool.BRUSH);
+        return true;
+    }
+
+    /** Contorno del hueco bajo el raton en la vista 3D. */
+    private void updateVoxelCursor(int mx, int my) {
+        preview.cursorPart = -1;
+        if (!voxelMode || tab != Tab.PAINT || !mouseMode || !tool.paints() || tool == Tool.PICKER
+                || dragging || !preview.contains(mx, my)) {
+            return;
+        }
+        VoxelTarget t = voxelTarget(mx, my, restMats());
+        if (t == null) {
+            return;
+        }
+        preview.cursorPart = t.part();
+        preview.cursorPos = t.pos();
+        preview.cursorColor = tool == Tool.ERASER ? 0xFFFF5050 : voxelRecolor ? brushColor | 0xFF000000 : 0xFFFFFFFF;
     }
 
     private int buildAnimateTab(int y) {
@@ -1331,6 +1612,325 @@ public class EditorScreen extends Screen {
         setFocused(null);
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Habilidades
+    // ---------------------------------------------------------------------------------------
+
+    private static final int SUB = 14;
+    private static final ExplosionSize[] BLAST_SIZES = {ExplosionSize.SMALL, ExplosionSize.MEDIUM, ExplosionSize.BIG};
+
+    private int buildAbilitiesTab(int y) {
+        y = intro(y);
+        Abilities a = def.abilities;
+        add(new TextLine(0, y, () -> Ui.tr("ability.active", def.abilities.activeCount()), Ui.ACCENT));
+        y += 14;
+
+        // Creeper
+        y = abilityRow(y, Items.CREEPER_SPAWN_EGG, "ability.explode", () -> a.explode, v -> a.explode = v);
+        if (a.explode) {
+            indent(SUB);
+            y = smallLabel(y, Ui.tr("ability.explode.size"));
+            y = chips(y, BLAST_SIZES, 3, () -> a.explodeSize, v -> a.explodeSize = v,
+                    v -> Ui.tr("explode." + v.key()), null) + 4;
+            y = numField(y, "ability.explode.range", () -> a.explodeRange, v -> a.explodeRange = v, 1f, 16f, 0.5f, false);
+            y = numField(y, "ability.explode.fuse", () -> (float) a.explodeFuse, v -> a.explodeFuse = Math.round(v),
+                    5f, 200f, 5f, true);
+            y = toggleRow(y, "ability.explode.dies", () -> a.explodeDies, v -> {
+                a.explodeDies = v;
+                requestRebuild();
+            }, "ability.explode.dies_tip");
+            if (!a.explodeDies) {
+                y = numField(y, "ability.explode.cooldown", () -> (float) a.explodeCooldown,
+                        v -> a.explodeCooldown = Math.round(v), 1f, 120f, 1f, true);
+            }
+            y = text(y, Ui.tr("ability.explode.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+
+        // Warden
+        y = abilityRow(y, Items.WARDEN_SPAWN_EGG, "ability.blind", () -> a.blind, v -> a.blind = v);
+        if (a.blind) {
+            indent(SUB);
+            y = numField(y, "ability.blind.range", () -> a.hearRange, v -> a.hearRange = v, 2f, 64f, 1f, false);
+            y = text(y, Ui.tr("ability.blind.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+        y = abilityRow(y, Items.WARDEN_SPAWN_EGG, "ability.sonic", () -> a.sonicBoom, v -> a.sonicBoom = v);
+        if (a.sonicBoom) {
+            indent(SUB);
+            y = numField(y, "ability.damage", () -> a.sonicDamage, v -> a.sonicDamage = v, 0f, 200f, 1f, false);
+            y = numField(y, "ability.range", () -> a.sonicRange, v -> a.sonicRange = v, 2f, 48f, 1f, false);
+            y = numField(y, "ability.cooldown_s", () -> (float) a.sonicCooldown, v -> a.sonicCooldown = Math.round(v),
+                    1f, 120f, 1f, true);
+            y = text(y, Ui.tr("ability.sonic.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+
+        // Enderman
+        y = abilityRow(y, Items.ENDERMAN_SPAWN_EGG, "ability.teleport", () -> a.teleport, v -> a.teleport = v);
+        if (a.teleport) {
+            indent(SUB);
+            y = numField(y, "ability.range", () -> a.teleportRange, v -> a.teleportRange = v, 2f, 64f, 1f, false);
+            y = toggleRow(y, "ability.teleport.dodge", () -> a.teleportDodge, v -> a.teleportDodge = v, null);
+            y = toggleRow(y, "ability.teleport.chase", () -> a.teleportChase, v -> a.teleportChase = v, null);
+            y += 4;
+            indent(-SUB);
+        }
+        y = abilityRow(y, Items.ENDERMAN_SPAWN_EGG, "ability.stare", () -> a.stareAnger, v -> a.stareAnger = v);
+        if (a.stareAnger) {
+            indent(SUB);
+            y = text(y, Ui.tr("ability.stare.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+
+        // Guardian
+        y = abilityRow(y, Items.GUARDIAN_SPAWN_EGG, "ability.beam", () -> a.beam, v -> a.beam = v);
+        if (a.beam) {
+            indent(SUB);
+            y = numField(y, "ability.damage", () -> a.beamDamage, v -> a.beamDamage = v, 0f, 200f, 1f, false);
+            y = numField(y, "ability.range", () -> a.beamRange, v -> a.beamRange = v, 2f, 48f, 1f, false);
+            y = numField(y, "ability.beam.charge", () -> (float) a.beamCharge, v -> a.beamCharge = Math.round(v),
+                    10f, 200f, 5f, true);
+            y = text(y, Ui.tr("ability.beam.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+        y = abilityRow(y, Items.GUARDIAN_SPAWN_EGG, "ability.thorns", () -> a.thorns, v -> a.thorns = v);
+        if (a.thorns) {
+            indent(SUB);
+            y = numField(y, "ability.damage", () -> a.thornsDamage, v -> a.thornsDamage = v, 0f, 100f, 0.5f, false) + 4;
+            indent(-SUB);
+        }
+        y = abilityRow(y, Items.ELDER_GUARDIAN_SPAWN_EGG, "ability.aura", () -> a.aura, v -> a.aura = v);
+        if (a.aura) {
+            indent(SUB);
+            HitEffect[] effects = java.util.Arrays.stream(HitEffect.values()).filter(e -> e != HitEffect.NONE)
+                    .toArray(HitEffect[]::new);
+            y = enumRow(y, "ability.aura.effect", effects, () -> a.auraEffect, v -> a.auraEffect = v,
+                    v -> Ui.tr("hit_effect." + v.key()));
+            y = numField(y, "ability.range", () -> a.auraRange, v -> a.auraRange = v, 2f, 48f, 1f, false);
+            y = numField(y, "ability.aura.interval", () -> (float) a.auraInterval, v -> a.auraInterval = Math.round(v),
+                    1f, 600f, 1f, true);
+            y = numField(y, "ability.aura.duration", () -> (float) a.auraDuration, v -> a.auraDuration = Math.round(v),
+                    1f, 600f, 1f, true);
+            y += 4;
+            indent(-SUB);
+        }
+
+        // Slime
+        y = abilityRow(y, Items.SLIME_SPAWN_EGG, "ability.split", () -> a.split, v -> a.split = v);
+        if (a.split) {
+            indent(SUB);
+            y = numField(y, "ability.split.count", () -> (float) a.splitCount, v -> a.splitCount = Math.round(v),
+                    2f, 4f, 1f, true);
+            y = numField(y, "ability.split.generations", () -> (float) a.splitGenerations,
+                    v -> a.splitGenerations = Math.round(v), 1f, 3f, 1f, true);
+            y = text(y, Ui.tr("ability.split.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+
+        // Arana
+        y = abilityRow(y, Items.SPIDER_SPAWN_EGG, "ability.climb", () -> a.climb, v -> a.climb = v);
+        y = abilityRow(y, Items.SPIDER_SPAWN_EGG, "ability.leap", () -> a.leap, v -> a.leap = v);
+
+        // Golem de hierro
+        y = abilityRow(y, Items.IRON_GOLEM_SPAWN_EGG, "ability.launch", () -> a.launch, v -> a.launch = v);
+        if (a.launch) {
+            indent(SUB);
+            y = numField(y, "ability.launch.power", () -> a.launchPower, v -> a.launchPower = v, 0.1f, 5f, 0.1f, false) + 4;
+            indent(-SUB);
+        }
+
+        // Bruja
+        y = abilityRow(y, Items.WITCH_SPAWN_EGG, "ability.heal", () -> a.selfHeal, v -> a.selfHeal = v);
+        if (a.selfHeal) {
+            indent(SUB);
+            y = numField(y, "ability.heal.amount", () -> a.selfHealAmount, v -> a.selfHealAmount = v, 1f, 1024f, 1f, false);
+            y = numField(y, "ability.cooldown_s", () -> (float) a.selfHealCooldown,
+                    v -> a.selfHealCooldown = Math.round(v), 1f, 600f, 1f, true);
+            y = text(y, Ui.tr("ability.heal.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+
+        // Invocador
+        y = abilityRow(y, Items.EVOKER_SPAWN_EGG, "ability.summon", () -> a.summon, v -> a.summon = v);
+        if (a.summon) {
+            indent(SUB);
+            y = smallLabel(y, Ui.tr("ability.summon.entity"));
+            entityField(0, y, contentW, () -> a.summonEntity, v -> a.summonEntity = v);
+            y += ROW;
+            y = numField(y, "ability.summon.count", () -> (float) a.summonCount, v -> a.summonCount = Math.round(v),
+                    1f, 6f, 1f, true);
+            y = numField(y, "ability.summon.max", () -> (float) a.summonMax, v -> a.summonMax = Math.round(v),
+                    1f, 16f, 1f, true);
+            y = numField(y, "ability.cooldown_s", () -> (float) a.summonCooldown, v -> a.summonCooldown = Math.round(v),
+                    1f, 600f, 1f, true);
+            y = text(y, Ui.tr("ability.summon.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+
+        // Devastador
+        y = abilityRow(y, Items.RAVAGER_SPAWN_EGG, "ability.charge", () -> a.charge, v -> a.charge = v);
+        if (a.charge) {
+            indent(SUB);
+            y = numField(y, "ability.damage", () -> a.chargeDamage, v -> a.chargeDamage = v, 0f, 200f, 1f, false);
+            y = numField(y, "ability.charge.speed", () -> a.chargeSpeed, v -> a.chargeSpeed = v, 0.3f, 3f, 0.1f, false);
+            y = numField(y, "ability.cooldown_s", () -> (float) a.chargeCooldown, v -> a.chargeCooldown = Math.round(v),
+                    1f, 120f, 1f, true);
+            y += 4;
+            indent(-SUB);
+        }
+
+        // Lobo
+        y = abilityRow(y, Items.WOLF_SPAWN_EGG, "ability.pack", () -> a.pack, v -> a.pack = v);
+        if (a.pack) {
+            indent(SUB);
+            y = numField(y, "ability.range", () -> a.packRange, v -> a.packRange = v, 2f, 64f, 1f, false) + 4;
+            indent(-SUB);
+        }
+
+        // Calamar, breeze
+        y = abilityRow(y, Items.SQUID_SPAWN_EGG, "ability.ink", () -> a.ink, v -> a.ink = v);
+        y = abilityRow(y, Items.BREEZE_SPAWN_EGG, "ability.deflect", () -> a.deflect, v -> a.deflect = v);
+        if (a.deflect) {
+            indent(SUB);
+            y = numField(y, "ability.deflect.chance", () -> (float) a.deflectChance, v -> a.deflectChance = Math.round(v),
+                    1f, 100f, 5f, true) + 4;
+            indent(-SUB);
+        }
+
+        // Gallina
+        y = abilityRow(y, Items.CHICKEN_SPAWN_EGG, "ability.slow_fall", () -> a.slowFall, v -> a.slowFall = v);
+        y = abilityRow(y, Items.CHICKEN_SPAWN_EGG, "ability.lay", () -> a.layItems, v -> a.layItems = v);
+        if (a.layItems) {
+            indent(SUB);
+            y = smallLabel(y, Ui.tr("ability.lay.item"));
+            itemField(0, y, contentW, () -> a.layItem, v -> a.layItem = v);
+            y += ROW;
+            y = numField(y, "ability.lay.interval", () -> (float) a.layInterval, v -> a.layInterval = Math.round(v),
+                    5f, 3600f, 10f, true) + 4;
+            indent(-SUB);
+        }
+
+        // Vaca
+        y = abilityRow(y, Items.COW_SPAWN_EGG, "ability.milk", () -> a.milkable, v -> a.milkable = v);
+        if (a.milkable) {
+            indent(SUB);
+            y = smallLabel(y, Ui.tr("ability.milk.with"));
+            itemField(0, y, contentW, () -> a.milkWith, v -> a.milkWith = v);
+            y += ROW;
+            y = smallLabel(y, Ui.tr("ability.milk.gives"));
+            itemField(0, y, contentW, () -> a.milkGives, v -> a.milkGives = v);
+            y += ROW;
+            y = toggleRow(y, "ability.milk.uses", () -> a.milkUsesItem, v -> a.milkUsesItem = v, "ability.milk.uses_tip");
+            y = numField(y, "ability.cooldown_s", () -> (float) a.milkCooldown, v -> a.milkCooldown = Math.round(v),
+                    0f, 3600f, 5f, true) + 4;
+            indent(-SUB);
+        }
+
+        // Zombi y aldeano
+        add(new AbilityHeader(0, y, contentW, new ItemStack(Items.ZOMBIE_SPAWN_EGG), Ui.tr("ability.doors"),
+                Ui.tr("ability.doors.tip")));
+        y += ROW;
+        indent(SUB);
+        y = chips(y, DoorMode.values(), 3, () -> a.doors, v -> a.doors = v, v -> Ui.tr("door." + v.key()), null) + 6;
+        indent(-SUB);
+
+        // Golem de nieve
+        y = abilityRow(y, Items.SNOW_GOLEM_SPAWN_EGG, "ability.trail", () -> a.trail, v -> a.trail = v);
+        if (a.trail) {
+            indent(SUB);
+            y = chips(y, TrailBlock.values(), 2, () -> a.trailBlock, v -> a.trailBlock = v,
+                    v -> Ui.tr("trail_block." + v.key()), null) + 2;
+            y = text(y, Ui.tr("ability.trail.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+
+        // Calamar luminoso, zorro
+        y = abilityRow(y, Items.GLOW_SQUID_SPAWN_EGG, "ability.glows", () -> a.glows, v -> a.glows = v);
+        y = abilityRow(y, Items.FOX_SPAWN_EGG, "ability.pick_up", () -> a.pickUp, v -> a.pickUp = v);
+
+        // Miedo
+        y = abilityRow(y, Items.CAT_SPAWN_EGG, "ability.fear", () -> a.fear, v -> a.fear = v);
+        if (a.fear) {
+            indent(SUB);
+            y = smallLabel(y, Ui.tr("ability.fear.entity"));
+            entityField(0, y, contentW, () -> a.fearEntity, v -> a.fearEntity = v);
+            y += ROW;
+            y = numField(y, "ability.range", () -> a.fearRange, v -> a.fearRange = v, 2f, 32f, 1f, false) + 4;
+            indent(-SUB);
+        }
+        y += 4;
+        return text(y, Ui.tr("ability.hint"), HINT);
+    }
+
+    /** Fila de una habilidad: el huevo del mob, la casilla y el nombre. Al cambiarla se ven u ocultan sus opciones. */
+    private int abilityRow(int y, Item icon, String key, BooleanSupplier getter, Consumer<Boolean> setter) {
+        add(new AbilityToggle(0, y, contentW, new ItemStack(icon), Ui.tr(key), Ui.tr(key + ".tip"), getter, v -> {
+            setter.accept(v);
+            requestRebuild();
+        }));
+        return y + ROW + 1;
+    }
+
+    /** Campo del id de un mob (de Minecraft o una criatura propia) con su lista para elegir. */
+    private void entityField(int x, int y, int w, Supplier<String> getter, Consumer<String> setter) {
+        int pickW = 14;
+        EditBox box = textBox(x, y, Math.max(20, w - pickW - 2), 64, getter.get(), v -> {
+            setter.accept(v.trim());
+            markChanged();
+        }, Ui.tr("field.entity_hint"));
+        add(new DropButton(x + w - pickW, y, pickW, Component::empty, () -> -1, Ui.tr("field.entity_pick"),
+                anchor -> openEntityDropdown(anchor.left() - (w - pickW), anchor.top(), w, anchor.h, box.getValue(),
+                        id -> {
+                            setter.accept(id);
+                            box.setValue(id);
+                            markChanged();
+                        })));
+    }
+
+    /** Mobs de Minecraft (los que no son "varios", como flechas o barcas) y las criaturas propias. */
+    private void openEntityDropdown(int ax, int ay, int aw, int ah, String filter, Consumer<String> onPick) {
+        String q = filter.trim().toLowerCase(Locale.ROOT);
+        if (q.startsWith("minecraft:")) {
+            q = q.substring("minecraft:".length());
+        }
+        List<String> ids = new ArrayList<>();
+        List<DropItem> items = new ArrayList<>();
+        for (CreatureDefinition other : CreatureStore.CLIENT.sorted()) {
+            if (other.id.equals(def.id)) {
+                continue;
+            }
+            if (!q.isEmpty() && !other.id.contains(q) && !other.name.toLowerCase(Locale.ROOT).contains(q)) {
+                continue;
+            }
+            ids.add(other.id);
+            items.add(new DropItem(Component.literal(other.name + "  \u00B7 " + other.id), 0xFF000000 | other.eggColor1, 0,
+                    false));
+        }
+        List<ResourceLocation> keys = new ArrayList<>(BuiltInRegistries.ENTITY_TYPE.keySet());
+        keys.sort((a, b) -> a.getPath().compareTo(b.getPath()));
+        for (ResourceLocation rl : keys) {
+            EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(rl);
+            if (type.getCategory() == MobCategory.MISC && type != EntityType.VILLAGER && type != EntityType.IRON_GOLEM
+                    && type != EntityType.SNOW_GOLEM) {
+                continue;
+            }
+            String id = rl.toString();
+            String name = type.getDescription().getString();
+            if (!q.isEmpty() && !id.contains(q) && !name.toLowerCase(Locale.ROOT).contains(q)) {
+                continue;
+            }
+            ids.add(id);
+            items.add(new DropItem(Component.literal(name + "  \u00B7 " + rl.getPath()), -1, 0, false));
+        }
+        if (items.isEmpty()) {
+            warn(Ui.tr("field.entity_no_match", filter.trim()));
+            return;
+        }
+        dropdown = new Dropdown(ax, ay, aw, ah, items, i -> onPick.accept(ids.get(i)));
+        setFocused(null);
+    }
+
     private int buildBehaviorTab(int y) {
         y = intro(y);
         y = section(y, Ui.tr("ai.behavior"));
@@ -1415,8 +2015,17 @@ public class EditorScreen extends Screen {
     // ---------------------------------------------------------------------------------------
 
     private <T extends Element> T add(T element) {
+        element.x += buildIndent;
         elements.add(element);
         return element;
+    }
+
+    /** Sangria (en pixeles) de lo que se va anadiendo al panel, para las opciones de cada habilidad. */
+    private int buildIndent;
+
+    private void indent(int px) {
+        buildIndent += px;
+        contentW -= px;
     }
 
     private <T extends AbstractWidget> T panelWidget(T widget, int contentY) {
@@ -1648,7 +2257,7 @@ public class EditorScreen extends Screen {
     // ---------------------------------------------------------------------------------------
 
     private int cx0() {
-        return panelX + PAD;
+        return panelX + PAD + buildIndent;
     }
 
     private int sy(int contentY) {
@@ -2394,6 +3003,11 @@ public class EditorScreen extends Screen {
             paint = showVanilla ? previewPaintFor(shown) : null;
         }
         AnimState anim = editing && mouseMode ? AnimState.REST : currentAnim(shown);
+        if (editing) {
+            updateVoxelCursor(mouseX, mouseY);
+        } else {
+            preview.cursorPart = -1;
+        }
         int outline = editing && tab.usesPart() && !(mouseMode && tool.paints()) ? selected : -1;
         view.render(g, shown, anim, outline, true, paint);
         if (editing && mouseMode) {
@@ -2551,13 +3165,19 @@ public class EditorScreen extends Screen {
      * Que hay debajo del raton en la fila (o columna, con el panel plegado) de pestanas: el indice de la pestana
      * en {@link #visibleTabs()}, -2 = boton de plegar/desplegar el panel, -1 = nada.
      */
+    /** Alto de cada casilla de la columna de pestanas plegada (mas bajas si no caben todas). */
+    private int stripCell() {
+        int rows = visibleTabs().length + 1;
+        return Math.max(16, Math.min(STRIP_CELL, (height - HEADER_H) / rows));
+    }
+
     private int tabAt(double mx, double my) {
         Tab[] visible = visibleTabs();
         if (mx < panelX || mx >= width || my < HEADER_H) {
             return -1;
         }
         if (panelCollapsed) {
-            int row = (int) ((my - HEADER_H) / STRIP_CELL);
+            int row = (int) ((my - HEADER_H) / stripCell());
             if (row == 0) {
                 return -2;
             }
@@ -2579,20 +3199,21 @@ public class EditorScreen extends Screen {
             int x = panelX + 1;
             int w = width - x;
             boolean hf = hovered == -2;
+            int cell = stripCell();
             if (hf) {
-                g.fill(x, HEADER_H, width, HEADER_H + STRIP_CELL, 0xFF2A2E38);
+                g.fill(x, HEADER_H, width, HEADER_H + cell, 0xFF2A2E38);
             }
-            g.drawCenteredString(font, "\u00AB", x + w / 2, HEADER_H + 6, hf ? 0xFFFFFFFF : Ui.MUTED);
+            g.drawCenteredString(font, "\u00AB", x + w / 2, HEADER_H + (cell - 8) / 2, hf ? 0xFFFFFFFF : Ui.MUTED);
             for (int i = 0; i < visible.length; i++) {
-                int y = HEADER_H + (i + 1) * STRIP_CELL;
+                int y = HEADER_H + (i + 1) * cell;
                 boolean active = visible[i] == tab;
                 if (active) {
-                    g.fill(x, y, width, y + STRIP_CELL, Ui.PANEL);
-                    g.fill(x, y, x + 2, y + STRIP_CELL, Ui.ACCENT);
+                    g.fill(x, y, width, y + cell, Ui.PANEL);
+                    g.fill(x, y, x + 2, y + cell, Ui.ACCENT);
                 } else if (hovered == i) {
-                    g.fill(x, y, width, y + STRIP_CELL, 0xFF2A2E38);
+                    g.fill(x, y, width, y + cell, 0xFF2A2E38);
                 }
-                g.renderItem(visible[i].icon(), x + (w - 16) / 2, y + 2);
+                g.renderItem(visible[i].icon(), x + (w - 16) / 2, y + (cell - 16) / 2);
             }
             return;
         }
@@ -2711,7 +3332,9 @@ public class EditorScreen extends Screen {
         List<FormattedCharSequence> lines = new ArrayList<>();
         lines.add(t.title().withStyle(ChatFormatting.YELLOW).getVisualOrderText());
         lines.addAll(font.split(t.description(), 190));
-        lines.add(Ui.tr("editor.tab_key", (i + 1) % 10).withStyle(ChatFormatting.DARK_GRAY).getVisualOrderText());
+        if (i < 10) {
+            lines.add(Ui.tr("editor.tab_key", (i + 1) % 10).withStyle(ChatFormatting.DARK_GRAY).getVisualOrderText());
+        }
         g.renderTooltip(font, lines, mx, my);
     }
 
@@ -3260,17 +3883,23 @@ public class EditorScreen extends Screen {
                 return true;
             }
             case PICKER -> {
-                return pickColor(mx, my, mats);
+                return voxelMode && tab == Tab.PAINT ? pickVoxelColor(mx, my, mats) : pickColor(mx, my, mats);
             }
             default -> {
-                if (preview.pickHit(def, mats, mx, my) == null) {
+                boolean voxels = voxelMode && tab == Tab.PAINT;
+                if (preview.pickHit(def, mats, mx, my, null, voxels && (tool == Tool.ERASER || voxelRecolor)) == null) {
                     return false;
                 }
                 painting = true;
                 strokeChanged = false;
+                strokeVoxels.clear();
                 paintLastX = mx;
                 paintLastY = my;
-                paintAt(mx, my, mats);
+                if (voxels) {
+                    voxelAt(mx, my, mats);
+                } else {
+                    paintAt(mx, my, mats);
+                }
                 return true;
             }
         }
@@ -3400,6 +4029,7 @@ public class EditorScreen extends Screen {
         gizmoStart = null;
         painting = false;
         strokeChanged = false;
+        strokeVoxels.clear();
         if (changed) {
             markChanged();
         }
@@ -3472,8 +4102,13 @@ public class EditorScreen extends Screen {
         double dx = mx - paintLastX;
         double dy = my - paintLastY;
         int steps = Math.max(1, (int) Math.ceil(Math.hypot(dx, dy) / 2.0));
+        boolean voxels = voxelMode && tab == Tab.PAINT;
         for (int k = 1; k <= steps; k++) {
-            paintAt(paintLastX + dx * k / steps, paintLastY + dy * k / steps, mats);
+            if (voxels) {
+                voxelAt(paintLastX + dx * k / steps, paintLastY + dy * k / steps, mats);
+            } else {
+                paintAt(paintLastX + dx * k / steps, paintLastY + dy * k / steps, mats);
+            }
         }
         paintLastX = mx;
         paintLastY = my;
@@ -3535,7 +4170,8 @@ public class EditorScreen extends Screen {
                     square(g, h[0], h[1], hover == 10 + f ? 4 : 3, color);
                 }
             }
-        } else if ((tool == Tool.BRUSH || tool == Tool.ERASER) && preview.contains(mx, my) && !dragging) {
+        } else if ((tool == Tool.BRUSH || tool == Tool.ERASER) && !(voxelMode && tab == Tab.PAINT)
+                && preview.contains(mx, my) && !dragging) {
             Preview3D.Hit hit = preview.pickHit(def, mats, mx, my);
             int[] tx = hit == null ? null : texelAt(hit);
             if (hit != null && tx != null) {
@@ -3603,7 +4239,7 @@ public class EditorScreen extends Screen {
         }
 
         int left() {
-            return cx0() + x;
+            return panelX + PAD + x; // la sangria ya esta sumada en x (ver add)
         }
 
         int top() {
@@ -3921,6 +4557,90 @@ public class EditorScreen extends Screen {
     }
 
     /** Casilla de verificacion con texto. model = false si no cambia la criatura (opciones de la vista). */
+    /** Casilla de una habilidad con el huevo del mob al lado (como el Toggle, pero mas alto y con icono). */
+    private final class AbilityToggle extends Element {
+        private final ItemStack icon;
+        private final Component label;
+        private final Component tip;
+        private final BooleanSupplier getter;
+        private final Consumer<Boolean> setter;
+
+        AbilityToggle(int x, int y, int w, ItemStack icon, Component label, Component tip, BooleanSupplier getter,
+                      Consumer<Boolean> setter) {
+            super(x, y, w, ROW);
+            this.icon = icon;
+            this.label = label;
+            this.tip = tip;
+            this.getter = getter;
+            this.setter = setter;
+        }
+
+        @Override
+        void render(GuiGraphics g, int mx, int my) {
+            int l = left();
+            int t = top();
+            boolean hover = hit(mx, my);
+            boolean on = getter.getAsBoolean();
+            g.fill(l, t, l + w, t + h, on ? 0x2A6FA8FF : (hover ? 0x20FFFFFF : 0x10FFFFFF));
+            g.renderItem(icon, l + 1, t + 1);
+            int bx = l + 20;
+            g.fill(bx, t + 4, bx + 10, t + 14, 0xFF1A1C21);
+            g.renderOutline(bx, t + 4, 10, 10, on ? Ui.ACCENT : (hover ? 0xFF8A93A6 : 0xFF5A6070));
+            if (on) {
+                g.fill(bx + 2, t + 6, bx + 8, t + 12, Ui.ACCENT);
+            }
+            String s = font.plainSubstrByWidth(label.getString(), Math.max(10, w - 36));
+            g.drawString(font, s, l + 34, t + 5, on ? 0xFFFFFFFF : Ui.TEXT, false);
+        }
+
+        @Override
+        boolean click(double mx, double my, int button) {
+            setter.accept(!getter.getAsBoolean());
+            markChanged();
+            playClick();
+            return true;
+        }
+
+        @Override
+        @Nullable
+        List<FormattedCharSequence> tooltip(double mx, double my) {
+            List<FormattedCharSequence> lines = new ArrayList<>();
+            lines.add(label.copy().withStyle(ChatFormatting.BOLD).getVisualOrderText());
+            lines.addAll(font.split(tip, 220));
+            return lines;
+        }
+    }
+
+    /** Titulo con icono (para las opciones que no se encienden con una casilla, como las puertas). */
+    private final class AbilityHeader extends Element {
+        private final ItemStack icon;
+        private final Component label;
+        private final Component tip;
+
+        AbilityHeader(int x, int y, int w, ItemStack icon, Component label, Component tip) {
+            super(x, y, w, ROW);
+            this.icon = icon;
+            this.label = label;
+            this.tip = tip;
+        }
+
+        @Override
+        void render(GuiGraphics g, int mx, int my) {
+            int l = left();
+            int t = top();
+            g.fill(l, t, l + w, t + h, 0x10FFFFFF);
+            g.renderItem(icon, l + 1, t + 1);
+            String s = font.plainSubstrByWidth(label.getString(), Math.max(10, w - 22));
+            g.drawString(font, s, l + 20, t + 5, Ui.TEXT, false);
+        }
+
+        @Override
+        @Nullable
+        List<FormattedCharSequence> tooltip(double mx, double my) {
+            return font.split(tip, 220);
+        }
+    }
+
     private final class Toggle extends Element {
         private final Component label;
         private final BooleanSupplier getter;

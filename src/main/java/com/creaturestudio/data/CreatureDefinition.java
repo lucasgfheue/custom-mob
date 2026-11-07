@@ -136,6 +136,9 @@ public class CreatureDefinition {
     /** Botin: hasta {@link #MAX_DROPS} objetos distintos, cada uno con su probabilidad. */
     public List<CreatureDrop> drops = new ArrayList<>();
 
+    // --- Habilidades (pestana Habilidades) ---
+    public Abilities abilities = new Abilities();
+
     // --- Aparicion natural ---
     public boolean naturalSpawn = false;
     public SpawnTime spawnTime = SpawnTime.ANY;
@@ -199,10 +202,28 @@ public class CreatureDefinition {
             if (skipWings && (p.anim == PartAnim.WING_A || p.anim == PartAnim.WING_B)) {
                 continue;
             }
+            // Caja de la pieza y, para encuadrar la vista (no para la caja de colision), sus minibloques
+            float bx0 = p.x;
+            float by0 = p.y;
+            float bz0 = p.z;
+            float bx1 = p.x + p.w;
+            float by1 = p.y + p.h;
+            float bz1 = p.z + p.d;
+            if (!ignoreWings && Voxels.count(p.voxels) > 0) {
+                for (int k = 0; k + 1 < p.voxels.length; k += 2) {
+                    int pos = p.voxels[k];
+                    bx0 = Math.min(bx0, p.x + Voxels.x(pos));
+                    by0 = Math.min(by0, p.y + Voxels.y(pos));
+                    bz0 = Math.min(bz0, p.z + Voxels.z(pos));
+                    bx1 = Math.max(bx1, p.x + Voxels.x(pos) + 1);
+                    by1 = Math.max(by1, p.y + Voxels.y(pos) + 1);
+                    bz1 = Math.max(bz1, p.z + Voxels.z(pos) + 1);
+                }
+            }
             for (int c = 0; c < 8; c++) {
-                float cx = (c & 1) == 0 ? p.x : p.x + p.w;
-                float cy = (c & 2) == 0 ? p.y : p.y + p.h;
-                float cz = (c & 4) == 0 ? p.z : p.z + p.d;
+                float cx = (c & 1) == 0 ? bx0 : bx1;
+                float cy = (c & 2) == 0 ? by0 : by1;
+                float cz = (c & 4) == 0 ? bz0 : bz1;
                 mats[i].transformPosition(cx, cy, cz, v);
                 minX = Math.min(minX, v.x);
                 minY = Math.min(minY, v.y);
@@ -379,6 +400,15 @@ public class CreatureDefinition {
             p.animSpeed = clamp(p.animSpeed, 0f, 5f);
         }
         sanitizePaint();
+        int voxelBudget = Voxels.MAX_TOTAL;
+        for (CreaturePart p : parts) {
+            p.voxels = Voxels.clean(p.voxels, voxelBudget);
+            voxelBudget -= Voxels.count(p.voxels);
+        }
+        if (abilities == null) {
+            abilities = new Abilities();
+        }
+        abilities.sanitize();
         if (texW < 8 || texH < 8 || texW > 4096 || texH > 4096) {
             texW = 0;
             texH = 0;
