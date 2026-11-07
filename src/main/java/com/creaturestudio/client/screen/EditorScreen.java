@@ -9,6 +9,12 @@ import com.creaturestudio.client.render.CreatureModelRenderer;
 import com.creaturestudio.client.render.PaintAtlas;
 import com.creaturestudio.client.render.Materials;
 import com.creaturestudio.data.Behavior;
+import com.creaturestudio.data.CreatureDrop;
+import com.creaturestudio.data.ExplosionSize;
+import com.creaturestudio.data.IndirectFire;
+import com.creaturestudio.data.RangedPresets;
+import com.creaturestudio.data.ShotSound;
+import com.creaturestudio.data.TrailType;
 import com.creaturestudio.data.BodyParts;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureJson;
@@ -44,6 +50,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.jetbrains.annotations.Nullable;
@@ -56,6 +63,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -83,6 +91,7 @@ public class EditorScreen extends Screen {
         PAINT("paint"),
         ANIMATE("animate"),
         STATS("stats"),
+        INVENTORY("inventory"),
         BEHAVIOR("behavior"),
         SPAWN("spawn");
 
@@ -117,6 +126,7 @@ public class EditorScreen extends Screen {
                     case PAINT -> Items.BRUSH;
                     case ANIMATE -> Items.CLOCK;
                     case STATS -> Items.GOLDEN_APPLE;
+                    case INVENTORY -> Items.CHEST;
                     case BEHAVIOR -> Items.IRON_SWORD;
                     case SPAWN -> Items.GRASS_BLOCK;
                 });
@@ -156,7 +166,10 @@ public class EditorScreen extends Screen {
     /** Pestanas que se ven en el modo facil y en el completo, en orden (teclas 1, 2, 3...). */
     private static final Tab[] EASY_TABS = {Tab.EASY, Tab.TEMPLATE, Tab.PAINT};
     private static final Tab[] FULL_TABS = {Tab.TEMPLATE, Tab.EASY, Tab.PARTS, Tab.SHAPE, Tab.PAINT, Tab.ANIMATE,
-            Tab.STATS, Tab.BEHAVIOR, Tab.SPAWN};
+            Tab.STATS, Tab.INVENTORY, Tab.BEHAVIOR, Tab.SPAWN};
+    /** Opciones Si/No para los grupos de botones. */
+    private static final Boolean[] NO_YES = {Boolean.FALSE, Boolean.TRUE};
+    private static final Boolean[] YES_NO = {Boolean.TRUE, Boolean.FALSE};
     private static final Tool[] SHAPE_TOOLS = {Tool.MOVE, Tool.RESIZE};
     private static final Tool[] PAINT_TOOLS = {Tool.BRUSH, Tool.ERASER, Tool.PICKER};
     private static final Integer[] BRUSH_SIZES = {1, 2, 3, 4, 6, 8};
@@ -174,7 +187,7 @@ public class EditorScreen extends Screen {
     private static final int STRIP_CELL = 20;
     /** Boton de plegar el panel, a la izquierda de la fila de pestanas. */
     private static final int FOLD_W = 12;
-    private static final int MIN_PANEL = 160;
+    private static final int MIN_PANEL = 175;
     private static final int PAD = 6;
     private static final int SCROLLBAR = 4;
     private static final int ROW = 18;
@@ -426,6 +439,7 @@ public class EditorScreen extends Screen {
             case PAINT -> buildPaintTab(y);
             case ANIMATE -> buildAnimateTab(y);
             case STATS -> buildStatsTab(y);
+            case INVENTORY -> buildInventoryTab(y);
             case BEHAVIOR -> buildBehaviorTab(y);
             case SPAWN -> buildSpawnTab(y);
         };
@@ -926,24 +940,395 @@ public class EditorScreen extends Screen {
 
     private int buildStatsTab(int y) {
         y = intro(y);
-        int lw = labelWidth("stat.health", "stat.damage", "stat.speed", "stat.armor", "stat.knockback",
-                "stat.follow_range", "stat.scale", "stat.xp");
-        y = numRow(y, lw, "stat.health", () -> def.health, v -> def.health = v, 1f, 1024f, 1f, false);
-        y = numRow(y, lw, "stat.damage", () -> def.damage, v -> def.damage = v, 0f, 200f, 0.5f, false);
-        y = numRow(y, lw, "stat.speed", () -> def.speed, v -> def.speed = v, 0.01f, 1.5f, 0.01f, false);
-        y = numRow(y, lw, "stat.armor", () -> def.armor, v -> def.armor = v, 0f, 30f, 1f, false);
-        y = numRow(y, lw, "stat.knockback", () -> def.knockbackResistance, v -> def.knockbackResistance = v,
-                0f, 1f, 0.05f, false);
-        y = numRow(y, lw, "stat.follow_range", () -> def.followRange, v -> def.followRange = v, 4f, 64f, 1f, false);
-        y = numRow(y, lw, "stat.scale", () -> def.scale, v -> def.scale = v, 0.1f, 8f, 0.1f, false);
-        y = numRow(y, lw, "stat.xp", () -> (float) def.xp, v -> def.xp = Math.round(v), 0f, 1000f, 1f, true);
+        y = section(y, Ui.tr("stats.general"));
+        y = numField(y, "stat.health", () -> def.health, v -> def.health = v, 1f, 1024f, 1f, false);
+        y = numField(y, "stat.speed", () -> def.speed, v -> def.speed = v, 0.01f, 1.5f, 0.01f, false);
+        y = numField(y, "stat.armor", () -> def.armor, v -> def.armor = v, 0f, 30f, 1f, false);
+        y = numField(y, "stat.scale", () -> def.scale, v -> def.scale = v, 0.1f, 8f, 0.1f, false);
+        y = numField(y, "stat.xp", () -> (float) def.xp, v -> def.xp = Math.round(v), 0f, 1000f, 1f, true);
         add(new TextLine(0, y + 2, () -> {
             float[] hb = def.hitbox();
             return Ui.tr("editor.size_info", Ui.fmt(Math.round(hb[0] * 100f) / 100f),
                     Ui.fmt(Math.round(hb[1] * 100f) / 100f));
         }, Ui.ACCENT));
-        y += 16;
+        y += 18;
+
+        // Reaparicion
+        y = section(y, Ui.tr("stats.respawn"));
+        y = toggleRow(y, "respawn.enabled", () -> def.respawn, v -> {
+            def.respawn = v;
+            requestRebuild();
+        }, "respawn.enabled_tip");
+        if (def.respawn) {
+            y = smallLabel(y, Ui.tr("respawn.when"));
+            y = chips(y, SpawnTime.values(), 3, () -> def.respawnTime, v -> def.respawnTime = v,
+                    v -> Ui.tr("respawn_time." + v.key()), null) + 4;
+            y = numField(y, "respawn.delay", () -> (float) def.respawnDelay, v -> def.respawnDelay = Math.round(v),
+                    1f, 3600f, 5f, true);
+            y = smallLabel(y, Ui.tr("respawn.where"));
+            y = chips(y, NO_YES, 2, () -> def.respawnAtHome, v -> def.respawnAtHome = v,
+                    v -> Ui.tr(v ? "respawn.home" : "respawn.death"), null) + 4;
+            y = numField(y, "respawn.limit", () -> (float) def.respawnLimit, v -> def.respawnLimit = Math.round(v),
+                    0f, 1000f, 1f, true);
+            y = text(y, Ui.tr("respawn.hint"), HINT);
+        }
+        y += 6;
+
+        // Cuerpo a cuerpo
+        y = section(y, Ui.tr("stats.melee"));
+        y = numField(y, "melee.strength", () -> def.damage, v -> def.damage = v, 0f, 200f, 0.5f, false);
+        y = numField(y, "melee.reach", () -> def.meleeReach, v -> def.meleeReach = v, 0f, 8f, 0.1f, false);
+        y = numField(y, "melee.speed", () -> (float) def.meleeInterval, v -> def.meleeInterval = Math.round(v),
+                4f, 200f, 1f, true);
+        y = numField(y, "melee.knockback", () -> def.meleeKnockback, v -> def.meleeKnockback = v, 0f, 10f, 0.5f, false);
+        y = enumRow(y, "melee.effect", HitEffect.values(), () -> def.hitEffect, v -> def.hitEffect = v,
+                v -> Ui.tr("hit_effect." + v.key()));
+        y = text(y, Ui.tr("melee.hint"), HINT) + 6;
+
+        // A distancia
+        y = section(y, Ui.tr("stats.ranged"));
+        y = chips(y, RangedType.values(), 0, () -> def.ranged, v -> {
+            RangedPresets.apply(def, v);
+            requestRebuild();
+        }, v -> Ui.tr("ranged." + v.key()), null) + 4;
+        if (def.ranged != RangedType.NONE) {
+            y = text(y, Ui.tr("ranged.preset_hint"), HINT) + 4;
+            y = numField(y, "ranged.accuracy", () -> (float) def.rangedAccuracy, v -> def.rangedAccuracy = Math.round(v),
+                    0f, 100f, 5f, true);
+            y = numField(y, "ranged.shots", () -> (float) def.shotCount, v -> def.shotCount = Math.round(v),
+                    1f, 10f, 1f, true);
+            y = numField(y, "ranged.range", () -> def.rangedRange, v -> def.rangedRange = v, 2f, 64f, 1f, false);
+            y = numField(y, "ranged.melee_range", () -> def.rangedMeleeRange, v -> def.rangedMeleeRange = v,
+                    0f, 16f, 0.5f, false);
+            y = numField(y, "ranged.min_delay", () -> (float) def.rangedMinDelay, v -> {
+                def.rangedMinDelay = Math.round(v);
+                def.rangedMaxDelay = Math.max(def.rangedMaxDelay, def.rangedMinDelay);
+            }, 1f, 400f, 5f, true);
+            y = numField(y, "ranged.max_delay", () -> (float) def.rangedMaxDelay,
+                    v -> def.rangedMaxDelay = Math.max(def.rangedMinDelay, Math.round(v)), 1f, 400f, 5f, true);
+            y = numField(y, "ranged.burst", () -> (float) def.burstCount, v -> def.burstCount = Math.round(v),
+                    1f, 20f, 1f, true);
+            y = numField(y, "ranged.burst_rate", () -> (float) def.burstRate, v -> def.burstRate = Math.round(v),
+                    1f, 100f, 1f, true);
+            y = soundRow(y, "ranged.fire_sound", () -> def.fireSound, v -> def.fireSound = v);
+            y = soundRow(y, "ranged.hit_sound", () -> def.hitSound, v -> def.hitSound = v);
+            y = soundRow(y, "ranged.ground_sound", () -> def.groundSound, v -> def.groundSound = v);
+            y = toggleRow(y, "ranged.aim", () -> def.aimWhileShooting, v -> def.aimWhileShooting = v, "ranged.aim_tip");
+            y = smallLabel(y, Ui.tr("ranged.indirect"));
+            y = chips(y, IndirectFire.values(), 2, () -> def.indirect, v -> def.indirect = v,
+                    v -> Ui.tr("indirect." + v.key()), v -> Ui.tr("indirect." + v.key() + ".tip")) + 2;
+            y = text(y, Ui.tr("ranged.hint"), HINT) + 6;
+
+            // Proyectil
+            y = section(y, Ui.tr("stats.projectile"));
+            y = smallLabel(y, Ui.tr("proj.item"));
+            itemField(0, y, contentW, () -> def.projItem, v -> def.projItem = v);
+            y += ROW;
+            y = numField(y, "proj.strength", () -> def.projStrength, v -> def.projStrength = v, 0f, 200f, 0.5f, false);
+            y = numField(y, "proj.size", () -> (float) def.projSize, v -> def.projSize = Math.round(v), 1f, 20f, 1f, true);
+            y = numField(y, "proj.speed", () -> (float) def.projSpeed, v -> def.projSpeed = Math.round(v), 1f, 50f, 1f, true);
+            y = toggleRow(y, "proj.gravity", () -> def.projGravity, v -> def.projGravity = v, "proj.gravity_tip");
+            y = smallLabel(y, Ui.tr("proj.motion"));
+            y = chips(y, NO_YES, 2, () -> def.projAccelerate, v -> def.projAccelerate = v,
+                    v -> Ui.tr(v ? "proj.accelerate" : "proj.constant"), null) + 4;
+            y = smallLabel(y, Ui.tr("proj.explode"));
+            y = chips(y, ExplosionSize.values(), 2, () -> def.projExplode, v -> def.projExplode = v,
+                    v -> Ui.tr("explode." + v.key()), null) + 4;
+            y = enumRow(y, "proj.effect", HitEffect.values(), () -> def.projEffect, v -> def.projEffect = v,
+                    v -> Ui.tr("hit_effect." + v.key()));
+            y = enumRow(y, "proj.trail", TrailType.values(), () -> def.projTrail, v -> def.projTrail = v,
+                    v -> Ui.tr("trail." + v.key()));
+            y = toggleRow(y, "proj.glows", () -> def.projGlows, v -> def.projGlows = v, null);
+            y = numField(y, "proj.knockback", () -> def.projKnockback, v -> def.projKnockback = v, 0f, 10f, 0.5f, false);
+            y = smallLabel(y, Ui.tr("proj.shape"));
+            y = chips(y, YES_NO, 2, () -> def.proj3D, v -> {
+                def.proj3D = v;
+                requestRebuild();
+            }, v -> Ui.tr(v ? "proj.3d" : "proj.2d"), v -> Ui.tr(v ? "proj.3d_tip" : "proj.2d_tip")) + 4;
+            if (def.proj3D) {
+                // como en el original: girar y clavarse son opciones del proyectil 3D
+                y = toggleRow(y, "proj.spins", () -> def.projSpins, v -> def.projSpins = v, null);
+                y = toggleRow(y, "proj.sticks", () -> def.projSticks, v -> def.projSticks = v, "proj.sticks_tip");
+            }
+            y = text(y, Ui.tr("proj.hint"), HINT);
+        }
+        y += 6;
+
+        // Resistencias
+        y = section(y, Ui.tr("stats.resist"));
+        y = numField(y, "resist.knockback", () -> Math.round(def.knockbackResistance * 100f) * 1f,
+                v -> def.knockbackResistance = v / 100f, 0f, 100f, 5f, true);
+        y = numField(y, "resist.arrow", () -> (float) def.resistArrow, v -> def.resistArrow = Math.round(v),
+                0f, 100f, 5f, true);
+        y = numField(y, "resist.melee", () -> (float) def.resistMelee, v -> def.resistMelee = Math.round(v),
+                0f, 100f, 5f, true);
+        y = numField(y, "resist.explosion", () -> (float) def.resistExplosion, v -> def.resistExplosion = Math.round(v),
+                0f, 100f, 5f, true);
+        y = text(y, Ui.tr("resist.hint"), HINT) + 6;
+
+        // Regeneracion
+        y = section(y, Ui.tr("stats.regen"));
+        y = numField(y, "regen.health", () -> def.healthRegen, v -> def.healthRegen = v, 0f, 100f, 0.5f, false);
+        y = numField(y, "regen.combat", () -> def.combatRegen, v -> def.combatRegen = v, 0f, 100f, 0.5f, false);
+        y = text(y, Ui.tr("regen.hint"), HINT) + 6;
+
+        // Alcance
+        y = section(y, Ui.tr("stats.range"));
+        y = numField(y, "range.vision", () -> def.visionRange, v -> def.visionRange = v, 1f, 128f, 1f, false);
+        y = toggleRow(y, "range.walls", () -> def.seeThroughWalls, v -> {
+            def.seeThroughWalls = v;
+            requestRebuild();
+        }, "range.walls_tip");
+        if (def.seeThroughWalls) {
+            y = numField(y, "range.wall_range", () -> def.wallRange, v -> def.wallRange = v, 1f, 128f, 1f, false);
+        }
+        y = numField(y, "range.follow", () -> def.followRange, v -> def.followRange = v, 4f, 128f, 1f, false);
+        y = text(y, Ui.tr("range.hint"), HINT) + 6;
+
+        // Otros
+        y = section(y, Ui.tr("stats.other"));
+        y = toggleRow(y, "other.can_drown", () -> def.canDrown, v -> def.canDrown = v, null);
+        y = toggleRow(y, "other.no_fall", () -> def.noFallDamage, v -> def.noFallDamage = v, null);
+        y = toggleRow(y, "other.cobweb", () -> def.cobwebAffected, v -> def.cobwebAffected = v, null);
+        y = toggleRow(y, "other.potion_immune", () -> def.potionImmune, v -> def.potionImmune = v, null);
+        y = toggleRow(y, "ai.fire_immune", () -> def.fireImmune, v -> def.fireImmune = v, null);
+        y = toggleRow(y, "ai.burns_in_sun", () -> def.burnsInSun, v -> def.burnsInSun = v, null);
+        y += 4;
         return text(y, Ui.tr("editor.hint.stats"), HINT);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Inventario
+    // ---------------------------------------------------------------------------------------
+
+    private int buildInventoryTab(int y) {
+        y = intro(y);
+        y = section(y, Ui.tr("inv.equipment"));
+        // nombre del hueco a la izquierda si queda sitio para el campo; si no, encima
+        int lw = labelWidth("inv.head", "inv.chest", "inv.legs", "inv.feet", "inv.main_hand", "inv.off_hand",
+                "inv.shield", "inv.projectile");
+        if (contentW - lw < 110) {
+            lw = 0;
+        }
+        y = equipRow(y, lw, "inv.head", () -> def.equipHead, v -> def.equipHead = v);
+        y = equipRow(y, lw, "inv.chest", () -> def.equipChest, v -> def.equipChest = v);
+        y = equipRow(y, lw, "inv.legs", () -> def.equipLegs, v -> def.equipLegs = v);
+        y = equipRow(y, lw, "inv.feet", () -> def.equipFeet, v -> def.equipFeet = v);
+        y = equipRow(y, lw, "inv.main_hand", () -> def.equipMainHand, v -> def.equipMainHand = v);
+        y = equipRow(y, lw, "inv.off_hand", () -> def.equipOffHand, v -> def.equipOffHand = v);
+        y = equipRow(y, lw, "inv.shield", () -> def.equipShield, v -> def.equipShield = v);
+        y = equipRow(y, lw, "inv.projectile", () -> def.projItem, v -> def.projItem = v);
+        y = numField(y, "inv.equip_drop", () -> (float) def.equipDropChance, v -> def.equipDropChance = Math.round(v),
+                0f, 100f, 5f, true);
+        y = text(y, Ui.tr("inv.equipment_hint"), HINT) + 8;
+
+        y = section(y, () -> Ui.tr("inv.drops", def.drops.size(), CreatureDefinition.MAX_DROPS));
+        for (int i = 0; i < def.drops.size(); i++) {
+            y = dropRow(y, def.drops.get(i));
+        }
+        if (def.drops.size() < CreatureDefinition.MAX_DROPS) {
+            button(0, y, contentW, Ui.tr("inv.add_drop"), b -> {
+                def.drops.add(new CreatureDrop("", 1, 1, 100));
+                markChanged();
+                requestRebuild();
+            }, null);
+            y += ROW;
+        }
+        y += 4;
+        return text(y, Ui.tr("inv.hint"), HINT);
+    }
+
+    /** Un hueco del equipo: su nombre (a la izquierda, o encima si lw = 0) y el objeto. */
+    private int equipRow(int y, int lw, String key, Supplier<String> getter, Consumer<String> setter) {
+        if (lw > 0) {
+            label(0, y, Ui.tr(key));
+        } else {
+            y = smallLabel(y, Ui.tr(key));
+        }
+        itemField(lw, y, contentW - lw, getter, setter);
+        return y + ROW + (lw > 0 ? 0 : 2);
+    }
+
+    /** Un objeto del botin: el objeto (con boton de quitar) y debajo su cantidad y su probabilidad. */
+    private int dropRow(int y, CreatureDrop drop) {
+        int delW = 16;
+        itemField(0, y, contentW - delW - GAP, () -> drop.item, v -> drop.item = v);
+        button(contentW - delW, y, delW, Component.literal("\u2715"), b -> {
+            def.drops.remove(drop);
+            markChanged();
+            requestRebuild();
+        }, Ui.tr("inv.remove_drop"));
+        y += ROW;
+        Component amount = Ui.tr("inv.amount");
+        Component to = Ui.tr("loot.to");
+        Component chance = Ui.tr("inv.chance");
+        int aw = font.width(amount) + 4;
+        int tw = font.width(to) + 6;
+        int cw = font.width(chance) + 4;
+        int fw = Math.max(22, (contentW - aw - tw - cw - 6) / 3);
+        int x = 0;
+        add(new TextLine(x, y + 4, () -> amount, Ui.MUTED));
+        x += aw;
+        number(x, y, fw, () -> (float) drop.min, v -> {
+            drop.min = Math.round(v);
+            drop.max = Math.max(drop.max, drop.min);
+        }, 0f, 64f, 1f, true);
+        x += fw;
+        add(new TextLine(x + 3, y + 4, () -> to, Ui.MUTED));
+        x += tw;
+        number(x, y, fw, () -> (float) drop.max, v -> drop.max = Math.max(drop.min, Math.round(v)), 0f, 64f, 1f, true);
+        x += fw + 6;
+        add(new TextLine(x, y + 4, () -> chance, Ui.MUTED));
+        x += cw;
+        number(x, y, Math.max(22, contentW - x), () -> (float) drop.chance, v -> drop.chance = Math.round(v),
+                1f, 100f, 5f, true);
+        return y + ROW + 5;
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Ayudantes de las pestanas Atributos e Inventario
+    // ---------------------------------------------------------------------------------------
+
+    /** Numero con su nombre a la izquierda; si el nombre no cabe, va encima. */
+    private int numField(int y, String key, Supplier<Float> getter, Consumer<Float> setter, float min, float max,
+                         float step, boolean integer) {
+        Component label = Ui.tr(key);
+        int fieldW = Mth.clamp(contentW / 3, 46, 70);
+        if (font.width(label) + 6 + fieldW <= contentW) {
+            label(0, y, label);
+            number(contentW - fieldW, y, fieldW, getter, setter, min, max, step, integer);
+            return y + ROW;
+        }
+        y = smallLabel(y, label);
+        number(0, y, contentW, getter, setter, min, max, step, integer);
+        return y + ROW;
+    }
+
+    private int toggleRow(int y, String key, BooleanSupplier getter, Consumer<Boolean> setter, @Nullable String tipKey) {
+        add(new Toggle(0, y, contentW, Ui.tr(key), getter, setter, tipKey == null ? null : Ui.tr(tipKey), true));
+        return y + CHIP_H + 2;
+    }
+
+    /** Lista desplegable para elegir un valor de una lista (efecto, estela...). */
+    private <E> int enumRow(int y, String key, E[] values, Supplier<E> getter, Consumer<E> setter,
+                            Function<E, Component> name) {
+        Component label = Ui.tr(key);
+        int lw = font.width(label) + 6;
+        if (lw + 80 > contentW) {
+            y = smallLabel(y, label);
+            lw = 0;
+        } else {
+            label(0, y, label);
+        }
+        add(new DropButton(lw, y, contentW - lw, () -> name.apply(getter.get()), () -> -1, null,
+                anchor -> openValueDropdown(anchor, values, getter, setter, name)));
+        return y + ROW;
+    }
+
+    private <E> void openValueDropdown(Element anchor, E[] values, Supplier<E> getter, Consumer<E> setter,
+                                       Function<E, Component> name) {
+        List<DropItem> items = new ArrayList<>();
+        E current = getter.get();
+        for (E v : values) {
+            items.add(new DropItem(name.apply(v), -1, 0, Objects.equals(v, current)));
+        }
+        openDropdown(anchor, items, i -> {
+            setter.accept(values[i]);
+            markChanged();
+        });
+    }
+
+    /** Sonido de la lista con un boton para escucharlo. */
+    private int soundRow(int y, String key, Supplier<ShotSound> getter, Consumer<ShotSound> setter) {
+        y = smallLabel(y, Ui.tr(key));
+        int testW = 18;
+        add(new DropButton(0, y, contentW - testW - GAP, () -> Ui.tr("shot_sound." + getter.get().key()), () -> -1, null,
+                anchor -> openValueDropdown(anchor, ShotSound.values(), getter, v -> {
+                    setter.accept(v);
+                    playSoundId(v.id);
+                }, v -> Ui.tr("shot_sound." + v.key()))));
+        button(contentW - testW, y, testW, Component.literal("\u266A"), b -> playSoundId(getter.get().id),
+                Ui.tr("ai.sound_test"));
+        return y + ROW;
+    }
+
+    private void playSoundId(String id) {
+        if (id == null || id.isEmpty()) {
+            return;
+        }
+        ResourceLocation rl = ResourceLocation.tryParse(id);
+        if (rl != null) {
+            BuiltInRegistries.SOUND_EVENT.getOptional(rl)
+                    .ifPresent(event -> minecraft.getSoundManager().play(SimpleSoundInstance.forUI(event, 1.0f)));
+        }
+    }
+
+    /** Campo de un objeto con su icono y un boton para buscarlo en la lista de objetos del juego. */
+    private void itemField(int x, int y, int w, Supplier<String> getter, Consumer<String> setter) {
+        int pickW = 14;
+        EditBox box = textBox(x, y, Math.max(20, w - FIELD_H - pickW - 4), 128, getter.get(), v -> {
+            setter.accept(v.trim());
+            markChanged();
+        }, Ui.tr("field.item_hint"));
+        box.setTextColor(itemColor(getter.get()));
+        refreshers.add(() -> box.setTextColor(itemColor(getter.get())));
+        add(new ItemIcon(x + w - FIELD_H - pickW - 2, y, getter));
+        add(new DropButton(x + w - pickW, y, pickW, Component::empty, () -> -1, Ui.tr("field.item_pick"),
+                anchor -> openItemDropdown(anchor.left() - (w - pickW), anchor.top(), w, anchor.h, box.getValue(),
+                        id -> {
+                            setter.accept(id);
+                            box.setValue(id);
+                            markChanged();
+                        })));
+    }
+
+    @Nullable
+    private static List<ResourceLocation> itemIds;
+
+    private static List<ResourceLocation> itemIds() {
+        if (itemIds == null) {
+            List<ResourceLocation> ids = new ArrayList<>(BuiltInRegistries.ITEM.keySet());
+            ids.sort((a, b) -> a.getPath().compareTo(b.getPath()));
+            itemIds = ids;
+        }
+        return itemIds;
+    }
+
+    /**
+     * Lista de objetos del juego. Si el campo tiene un objeto que existe, se ve la lista entera con ese marcado;
+     * si tiene otra cosa, solo los objetos que la contienen (en el id o en el nombre).
+     */
+    private void openItemDropdown(int ax, int ay, int aw, int ah, String filter, Consumer<String> onPick) {
+        String current = resolveItem(filter).isEmpty() ? "" : CreatureDefinition.cleanResource(filter);
+        String q = current.isEmpty() ? filter.trim().toLowerCase(Locale.ROOT) : "";
+        if (q.startsWith("minecraft:")) {
+            q = q.substring("minecraft:".length());
+        }
+        List<String> ids = new ArrayList<>();
+        List<DropItem> items = new ArrayList<>();
+        for (ResourceLocation rl : itemIds()) {
+            if (items.size() >= 2000) {
+                break;
+            }
+            Item item = BuiltInRegistries.ITEM.get(rl);
+            if (item == Items.AIR) {
+                continue;
+            }
+            String id = rl.toString();
+            String name = item.getDescription().getString();
+            if (!q.isEmpty() && !id.contains(q) && !name.toLowerCase(Locale.ROOT).contains(q)) {
+                continue;
+            }
+            ids.add(id);
+            String shown = rl.getNamespace().equals("minecraft") ? rl.getPath() : id;
+            items.add(new DropItem(Component.literal(name + "  \u00B7 " + shown), -1, 0, id.equals(current)));
+        }
+        if (items.isEmpty()) {
+            warn(Ui.tr("field.item_no_match", filter.trim()));
+            return;
+        }
+        dropdown = new Dropdown(ax, ay, aw, ah, items, i -> onPick.accept(ids.get(i)));
+        setFocused(null);
     }
 
     private int buildBehaviorTab(int y) {
@@ -959,14 +1344,6 @@ public class EditorScreen extends Screen {
         y = chips(y, Movement.values(), 2, () -> def.movement, v -> def.movement = v,
                 v -> Ui.tr("movement." + v.key()), null) + 8;
 
-        y = section(y, Ui.tr("ai.ranged"));
-        y = chips(y, RangedType.values(), 0, () -> def.ranged, v -> def.ranged = v,
-                v -> Ui.tr("ranged." + v.key()), null) + 8;
-
-        y = section(y, Ui.tr("ai.hit_effect"));
-        y = chips(y, HitEffect.values(), 0, () -> def.hitEffect, v -> def.hitEffect = v,
-                v -> Ui.tr("hit_effect." + v.key()), null) + 8;
-
         y = section(y, Ui.tr("ai.sound"));
         Component listen = Component.literal("\u266A ").append(Ui.tr("ai.sound_test"));
         int listenW = Math.min(contentW / 2, Math.max(56, font.width(listen) + 12));
@@ -976,13 +1353,10 @@ public class EditorScreen extends Screen {
         y += ROW + 6;
 
         y = section(y, Ui.tr("ai.extra"));
-        add(new Toggle(0, y, contentW, Ui.tr("ai.fire_immune"), () -> def.fireImmune, v -> def.fireImmune = v,
-                null, true));
-        y += CHIP_H + 2;
-        add(new Toggle(0, y, contentW, Ui.tr("ai.burns_in_sun"), () -> def.burnsInSun, v -> def.burnsInSun = v,
-                null, true));
-        y += CHIP_H + 6;
-        y = itemRow(y, Ui.tr("ai.tempt_item"), () -> def.temptItem, v -> def.temptItem = v);
+        y = smallLabel(y, Ui.tr("ai.tempt_item"));
+        itemField(0, y, contentW, () -> def.temptItem, v -> def.temptItem = v);
+        y += ROW;
+        y = text(y, Ui.tr("ai.moved_to_stats"), HINT) + 4;
         y += 4;
         return text(y, Ui.tr("editor.hint.ai"), HINT);
     }
@@ -1009,18 +1383,7 @@ public class EditorScreen extends Screen {
                 1f, 32f, 1f, true);
         y += 6;
 
-        y = section(y, Ui.tr("loot.section"));
-        y = itemRow(y, Ui.tr("loot.item"), () -> def.dropItem, v -> def.dropItem = v);
-        int alw = labelWidth("loot.amount");
-        label(0, y, Ui.tr("loot.amount"));
-        Component to = Ui.tr("loot.to");
-        int toW = font.width(to) + 8;
-        int fw = (contentW - alw - toW) / 2;
-        number(alw, y, fw, () -> (float) def.dropMin, v -> def.dropMin = Math.round(v), 0f, 64f, 1f, true);
-        add(new TextLine(alw + fw + 4, y + 4, () -> to, Ui.MUTED));
-        number(alw + fw + toW, y, contentW - alw - fw - toW, () -> (float) def.dropMax,
-                v -> def.dropMax = Math.round(v), 0f, 64f, 1f, true);
-        y += ROW + 6;
+        y = text(y, Ui.tr("spawn.loot_moved"), HINT) + 8;
 
         y = section(y, Ui.tr("egg.section"));
         IntSupplier eggColor = () -> eggSlot == 0 ? def.eggColor1 : def.eggColor2;
@@ -1246,19 +1609,6 @@ public class EditorScreen extends Screen {
         return box;
     }
 
-    /** Etiqueta encima y, debajo, el campo del item con su icono a la derecha. */
-    private int itemRow(int y, Component label, Supplier<String> getter, Consumer<String> setter) {
-        y = smallLabel(y, label);
-        EditBox box = textBox(0, y, contentW - FIELD_H - 4, 128, getter.get(), v -> {
-            setter.accept(v.trim());
-            markChanged();
-        }, Ui.tr("field.item_hint"));
-        box.setTextColor(itemColor(getter.get()));
-        refreshers.add(() -> box.setTextColor(itemColor(getter.get())));
-        add(new ItemIcon(contentW - FIELD_H, y, getter));
-        return y + ROW;
-    }
-
     private static int itemColor(String id) {
         if (id == null || id.isBlank()) {
             return Ui.TEXT;
@@ -1405,7 +1755,7 @@ public class EditorScreen extends Screen {
 
     private void addPart() {
         if (def.parts.size() >= CreatureDefinition.MAX_PARTS) {
-            showNotice(Ui.tr("editor.too_many_parts", CreatureDefinition.MAX_PARTS), false);
+            warn(Ui.tr("editor.too_many_parts", CreatureDefinition.MAX_PARTS));
             return;
         }
         CreaturePart p = CreaturePart.box(Ui.tr("editor.part.default_name", def.parts.size() + 1).getString(),
@@ -1446,7 +1796,7 @@ public class EditorScreen extends Screen {
         }
         List<Integer> nodes = subtree(selected);
         if (def.parts.size() + nodes.size() > CreatureDefinition.MAX_PARTS) {
-            showNotice(Ui.tr("editor.too_many_parts", CreatureDefinition.MAX_PARTS), false);
+            warn(Ui.tr("editor.too_many_parts", CreatureDefinition.MAX_PARTS));
             return;
         }
         Map<Integer, Integer> remap = new HashMap<>();
@@ -1548,7 +1898,7 @@ public class EditorScreen extends Screen {
     private void importVanilla(VanillaModels.Entry entry) {
         CreatureDefinition src = VanillaModels.load(entry);
         if (src == null) {
-            showNotice(Ui.tr("vanilla.failed"), false);
+            warn(Ui.tr("vanilla.failed"));
             return;
         }
         List<CreaturePart> parts = new ArrayList<>();
@@ -1578,7 +1928,7 @@ public class EditorScreen extends Screen {
         BodyParts.Result r = BodyParts.add(def, kind, easyColor);
         Component name = Ui.tr("easy.part." + kind.key);
         if (r == null) {
-            showNotice(Ui.tr("editor.too_many_parts", CreatureDefinition.MAX_PARTS), false);
+            warn(Ui.tr("editor.too_many_parts", CreatureDefinition.MAX_PARTS));
             return;
         }
         if (r.index() >= 0 && r.index() < def.parts.size()) {
@@ -1730,7 +2080,7 @@ public class EditorScreen extends Screen {
         }
         int painted = SkinLayout.apply(def, image.argb(), image.width(), image.height());
         if (painted == 0) {
-            showNotice(Ui.tr("skin.no_parts"), false);
+            warn(Ui.tr("skin.no_parts"));
             requestRebuild();
             return;
         }
@@ -1750,7 +2100,7 @@ public class EditorScreen extends Screen {
     private void exportSkin() {
         int placed = SkinLayout.autoLayout(def);
         if (def.texW <= 0 || def.texH <= 0 || SkinLayout.mapped(def) == 0) {
-            showNotice(Ui.tr("skin.no_parts"), false);
+            warn(Ui.tr("skin.no_parts"));
             return;
         }
         if (placed > 0) {
@@ -1761,7 +2111,7 @@ public class EditorScreen extends Screen {
             Path file = ClientFiles.writeSkin(name, SkinLayout.export(def), def.texW, def.texH);
             showNotice(Ui.tr("skin.exported", file.getFileName().toString()), true);
         } catch (IOException e) {
-            showNotice(Ui.tr("skin.failed_write"), false);
+            warn(Ui.tr("skin.failed_write"));
         }
         requestRebuild();
     }
@@ -1916,7 +2266,7 @@ public class EditorScreen extends Screen {
 
     private void undo() {
         if (undoStack.isEmpty()) {
-            showNotice(Ui.tr("editor.nothing_to_undo"), false);
+            warn(Ui.tr("editor.nothing_to_undo"));
             return;
         }
         redoStack.push(committed);
@@ -1964,6 +2314,13 @@ public class EditorScreen extends Screen {
         dirty = false;
         isNew = false;
         showNotice(Ui.tr("editor.saving"), true);
+    }
+
+    /** Aviso en rojo de algo que no se pudo hacer aqui (no cambia la criatura: no la marca sin guardar). */
+    private void warn(Component message) {
+        status = message;
+        statusColor = Ui.ERROR;
+        statusUntil = Util.getMillis() + 3500;
     }
 
     public void showNotice(Component message, boolean success) {
@@ -2354,7 +2711,7 @@ public class EditorScreen extends Screen {
         List<FormattedCharSequence> lines = new ArrayList<>();
         lines.add(t.title().withStyle(ChatFormatting.YELLOW).getVisualOrderText());
         lines.addAll(font.split(t.description(), 190));
-        lines.add(Ui.tr("editor.tab_key", i + 1).withStyle(ChatFormatting.DARK_GRAY).getVisualOrderText());
+        lines.add(Ui.tr("editor.tab_key", (i + 1) % 10).withStyle(ChatFormatting.DARK_GRAY).getVisualOrderText());
         g.renderTooltip(font, lines, mx, my);
     }
 
@@ -2687,9 +3044,11 @@ public class EditorScreen extends Screen {
         }
         if (!textFocused()) {
             Tab[] visible = visibleTabs();
-            if (!hasControlDown() && keyCode >= GLFW.GLFW_KEY_1 && keyCode < GLFW.GLFW_KEY_1 + visible.length) {
+            int number = keyCode == GLFW.GLFW_KEY_0 ? 9 : keyCode - GLFW.GLFW_KEY_1;
+            if (!hasControlDown() && (keyCode == GLFW.GLFW_KEY_0 || keyCode >= GLFW.GLFW_KEY_1)
+                    && number >= 0 && number < Math.min(visible.length, 10) && keyCode <= GLFW.GLFW_KEY_9) {
                 setPanelCollapsed(false);
-                switchTab(visible[keyCode - GLFW.GLFW_KEY_1]);
+                switchTab(visible[number]);
                 return true;
             }
             if (tab.usesPart() && sel() != null) {
@@ -3083,7 +3442,7 @@ public class EditorScreen extends Screen {
             int pd = CreaturePart.paintDim(p.d);
             int need = PaintLayout.imageW(CreaturePart.paintDim(p.w), pd) * PaintLayout.imageH(CreaturePart.paintDim(p.h), pd);
             if (paintTexels() + need > CreatureDefinition.MAX_PAINT_TEXELS) {
-                showNotice(Ui.tr("paint.too_much"), false);
+                warn(Ui.tr("paint.too_much"));
                 return;
             }
             p.ensurePaint();
@@ -4380,7 +4739,8 @@ public class EditorScreen extends Screen {
         }
 
         void scrollBy(double amount) {
-            scroll = Mth.clamp(scroll - (int) Math.signum(amount), 0, Math.max(0, items.size() - rows));
+            int step = items.size() > 200 ? 8 : items.size() > 60 ? 4 : 1;
+            scroll = Mth.clamp(scroll - (int) Math.signum(amount) * step, 0, Math.max(0, items.size() - rows));
         }
     }
 }

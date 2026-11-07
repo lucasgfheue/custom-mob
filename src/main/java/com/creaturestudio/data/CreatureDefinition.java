@@ -49,10 +49,92 @@ public class CreatureDefinition {
     public boolean burnsInSun = false;
     public String temptItem = "";
 
-    // --- Botin ---
-    public String dropItem = "";
-    public int dropMin = 0;
-    public int dropMax = 1;
+    // --- Reaparicion ---
+    public boolean respawn = false;
+    public SpawnTime respawnTime = SpawnTime.ANY;
+    /** Segundos desde que muere hasta que vuelve. */
+    public int respawnDelay = 30;
+    /** true = vuelve donde aparecio por primera vez; false = donde murio. */
+    public boolean respawnAtHome = false;
+    /** Cuantas veces puede volver (0 = siempre). */
+    public int respawnLimit = 0;
+
+    // --- Cuerpo a cuerpo (la fuerza es damage y el efecto hitEffect) ---
+    /** Alcance del golpe en bloques, desde el borde de su cuerpo. */
+    public float meleeReach = 0.8f;
+    /** Ticks entre golpe y golpe (20 = un segundo). */
+    public int meleeInterval = 20;
+    public float meleeKnockback = 0f;
+
+    // --- A distancia (el tipo es ranged) ---
+    public int rangedAccuracy = 60;
+    public int shotCount = 1;
+    public float rangedRange = 15f;
+    /** Si el objetivo esta mas cerca que esto, ataca cuerpo a cuerpo (0 = nunca). */
+    public float rangedMeleeRange = 0f;
+    public int rangedMinDelay = 20;
+    public int rangedMaxDelay = 40;
+    public int burstCount = 1;
+    public int burstRate = 5;
+    public ShotSound fireSound = ShotSound.BOW;
+    public ShotSound hitSound = ShotSound.ARROW_HIT;
+    public ShotSound groundSound = ShotSound.ARROW_HIT;
+    /** Se queda quieto apuntando mientras dispara (si no, dispara sin dejar de moverse). */
+    public boolean aimWhileShooting = true;
+    public IndirectFire indirect = IndirectFire.NO;
+
+    // --- Proyectil ---
+    public String projItem = "minecraft:arrow";
+    public float projStrength = 4f;
+    /** Tamano: 5 = normal, 10 = el doble. */
+    public int projSize = 5;
+    /** Velocidad: 10 = la de una bola de nieve. */
+    public int projSpeed = 10;
+    public boolean projGravity = true;
+    public boolean projAccelerate = false;
+    public ExplosionSize projExplode = ExplosionSize.NONE;
+    public HitEffect projEffect = HitEffect.NONE;
+    public TrailType projTrail = TrailType.NONE;
+    public boolean projGlows = false;
+    public float projKnockback = 0f;
+    /** true = objeto en 3D orientado hacia donde vuela; false = dibujo plano que mira a la camara. */
+    public boolean proj3D = true;
+    public boolean projSpins = false;
+    public boolean projSticks = true;
+
+    // --- Resistencias en % (la del empuje es knockbackResistance, de 0 a 1) ---
+    public int resistArrow = 0;
+    public int resistMelee = 0;
+    public int resistExplosion = 0;
+
+    // --- Regeneracion (vida por segundo) ---
+    public float healthRegen = 0f;
+    public float combatRegen = 0f;
+
+    // --- Alcance (la persecucion es followRange) ---
+    public float visionRange = 24f;
+    public boolean seeThroughWalls = false;
+    public float wallRange = 24f;
+
+    // --- Otros ---
+    public boolean canDrown = true;
+    public boolean noFallDamage = false;
+    public boolean cobwebAffected = true;
+    public boolean potionImmune = false;
+
+    // --- Inventario ---
+    public static final int MAX_DROPS = 10;
+    public String equipHead = "";
+    public String equipChest = "";
+    public String equipLegs = "";
+    public String equipFeet = "";
+    public String equipMainHand = "";
+    public String equipOffHand = "";
+    public String equipShield = "";
+    /** Probabilidad (%) de soltar cada pieza del equipo al morir. */
+    public int equipDropChance = 0;
+    /** Botin: hasta {@link #MAX_DROPS} objetos distintos, cada uno con su probabilidad. */
+    public List<CreatureDrop> drops = new ArrayList<>();
 
     // --- Aparicion natural ---
     public boolean naturalSpawn = false;
@@ -180,7 +262,7 @@ public class CreatureDefinition {
         speed = clamp(speed, 0.01f, 1.5f);
         armor = clamp(armor, 0f, 30f);
         knockbackResistance = clamp(knockbackResistance, 0f, 1f);
-        followRange = clamp(followRange, 4f, 64f);
+        followRange = clamp(followRange, 4f, 128f);
         xp = clampInt(xp, 0, 1000);
 
         if (behavior == null) behavior = Behavior.PASSIVE;
@@ -191,9 +273,66 @@ public class CreatureDefinition {
         if (spawnTime == null) spawnTime = SpawnTime.ANY;
 
         temptItem = cleanResource(temptItem);
-        dropItem = cleanResource(dropItem);
-        dropMin = clampInt(dropMin, 0, 64);
-        dropMax = clampInt(dropMax, dropMin, 64);
+
+        if (respawnTime == null) respawnTime = SpawnTime.ANY;
+        respawnDelay = clampInt(respawnDelay, 1, 3600);
+        respawnLimit = clampInt(respawnLimit, 0, 1000);
+
+        meleeReach = clamp(meleeReach, 0f, 8f);
+        meleeInterval = clampInt(meleeInterval, 4, 200);
+        meleeKnockback = clamp(meleeKnockback, 0f, 10f);
+
+        rangedAccuracy = clampInt(rangedAccuracy, 0, 100);
+        shotCount = clampInt(shotCount, 1, 10);
+        rangedRange = clamp(rangedRange, 2f, 64f);
+        rangedMeleeRange = clamp(rangedMeleeRange, 0f, 16f);
+        rangedMinDelay = clampInt(rangedMinDelay, 1, 400);
+        rangedMaxDelay = clampInt(rangedMaxDelay, rangedMinDelay, 400);
+        burstCount = clampInt(burstCount, 1, 20);
+        burstRate = clampInt(burstRate, 1, 100);
+        if (fireSound == null) fireSound = ShotSound.NONE;
+        if (hitSound == null) hitSound = ShotSound.NONE;
+        if (groundSound == null) groundSound = ShotSound.NONE;
+        if (indirect == null) indirect = IndirectFire.NO;
+
+        projItem = cleanResource(projItem);
+        projStrength = clamp(projStrength, 0f, 200f);
+        projSize = clampInt(projSize, 1, 20);
+        projSpeed = clampInt(projSpeed, 1, 50);
+        if (projExplode == null) projExplode = ExplosionSize.NONE;
+        if (projEffect == null) projEffect = HitEffect.NONE;
+        if (projTrail == null) projTrail = TrailType.NONE;
+        projKnockback = clamp(projKnockback, 0f, 10f);
+
+        resistArrow = clampInt(resistArrow, 0, 100);
+        resistMelee = clampInt(resistMelee, 0, 100);
+        resistExplosion = clampInt(resistExplosion, 0, 100);
+        healthRegen = clamp(healthRegen, 0f, 100f);
+        combatRegen = clamp(combatRegen, 0f, 100f);
+        visionRange = clamp(visionRange, 1f, 128f);
+        wallRange = clamp(wallRange, 1f, 128f);
+
+        equipHead = cleanResource(equipHead);
+        equipChest = cleanResource(equipChest);
+        equipLegs = cleanResource(equipLegs);
+        equipFeet = cleanResource(equipFeet);
+        equipMainHand = cleanResource(equipMainHand);
+        equipOffHand = cleanResource(equipOffHand);
+        equipShield = cleanResource(equipShield);
+        equipDropChance = clampInt(equipDropChance, 0, 100);
+        if (drops == null) {
+            drops = new ArrayList<>();
+        }
+        drops.removeIf(Objects::isNull);
+        for (CreatureDrop drop : drops) {
+            drop.item = cleanResource(drop.item);
+            drop.min = clampInt(drop.min, 0, 64);
+            drop.max = clampInt(drop.max, drop.min, 64);
+            drop.chance = clampInt(drop.chance, 1, 100);
+        }
+        while (drops.size() > MAX_DROPS) {
+            drops.remove(drops.size() - 1);
+        }
 
         spawnBiomes = cleanBiomes(spawnBiomes);
         spawnChance = clampInt(spawnChance, 1, 100);
@@ -319,7 +458,8 @@ public class CreatureDefinition {
         if (s == null) {
             return "";
         }
-        s = s.trim().toLowerCase(Locale.ROOT);
+        // "Diamond Sword" -> "minecraft:diamond_sword"
+        s = s.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", "_");
         if (s.isEmpty()) {
             return "";
         }

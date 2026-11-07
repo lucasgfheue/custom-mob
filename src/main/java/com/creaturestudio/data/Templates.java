@@ -285,7 +285,10 @@ public final class Templates {
         CreatureDefinition d = b.def;
         d.movement = Movement.FLY;
         d.behavior = Behavior.NEUTRAL;
-        d.ranged = RangedType.FIREBALL;
+        RangedPresets.apply(d, RangedType.FIREBALL);
+        d.projStrength = 8f;
+        d.rangedRange = 20f;
+        d.rangedMeleeRange = 4f;
         d.sound = SoundPreset.DRAGON;
         d.fireImmune = true;
         d.health = 120;

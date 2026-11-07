@@ -2,6 +2,7 @@ package com.creaturestudio.registry;
 
 import com.creaturestudio.CreatureStudio;
 import com.creaturestudio.block.CreatureStudioBlock;
+import com.creaturestudio.entity.CreatureProjectile;
 import com.creaturestudio.entity.CustomCreature;
 import com.creaturestudio.item.CreatureEggItem;
 import com.mojang.serialization.Codec;
@@ -53,6 +54,14 @@ public final class ModRegistry {
                     .sized(0.8f, 1.0f)
                     .clientTrackingRange(10)
                     .build("custom_creature"));
+
+    /** Proyectil configurable que disparan las criaturas. */
+    public static final DeferredHolder<EntityType<?>, EntityType<CreatureProjectile>> PROJECTILE =
+            ENTITIES.register("projectile", () -> EntityType.Builder.<CreatureProjectile>of(CreatureProjectile::new, MobCategory.MISC)
+                    .sized(0.25f, 0.25f)
+                    .clientTrackingRange(4)
+                    .updateInterval(10)
+                    .build("projectile"));
 
     private ModRegistry() {
     }

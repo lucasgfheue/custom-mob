@@ -1,5 +1,6 @@
 package com.creaturestudio.client;
 
+import com.creaturestudio.client.render.CreatureProjectileRenderer;
 import com.creaturestudio.client.render.CustomCreatureRenderer;
 import com.creaturestudio.client.render.PaintCache;
 import com.creaturestudio.data.CreatureDefinition;
@@ -39,6 +40,7 @@ public final class ClientSetup {
 
     private static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModRegistry.CUSTOM_CREATURE.get(), CustomCreatureRenderer::new);
+        event.registerEntityRenderer(ModRegistry.PROJECTILE.get(), CreatureProjectileRenderer::new);
     }
 
     private static void registerKeys(RegisterKeyMappingsEvent event) {

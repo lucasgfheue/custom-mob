@@ -63,11 +63,17 @@ public class CreatureEntityModel extends EntityModel<CustomCreature> {
         poseStack.popPose();
     }
 
+    /** Pose del ultimo dibujado de esta definicion (para las capas de pintura y de equipo), o null. */
+    @Nullable
+    public Matrix4f[] lastPose(@Nullable CreatureDefinition d) {
+        return d != null && this.lastDef == d ? this.lastMats : null;
+    }
+
     /**
      * LivingEntityRenderer deja el espacio "al reves" (Y hacia abajo y 1,5 bloques arriba);
      * aqui se vuelve a un espacio en pixeles con Y hacia arriba y el suelo en 0.
      */
-    private static void toModelSpace(PoseStack poseStack) {
+    static void toModelSpace(PoseStack poseStack) {
         poseStack.translate(0.0f, 1.501f, 0.0f);
         poseStack.scale(1.0f / 16.0f, -1.0f / 16.0f, 1.0f / 16.0f);
     }

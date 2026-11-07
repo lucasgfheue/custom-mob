@@ -21,6 +21,7 @@ public class CustomCreatureRenderer extends MobRenderer<CustomCreature, Creature
     public CustomCreatureRenderer(EntityRendererProvider.Context context) {
         super(context, new CreatureEntityModel(), 0.5f);
         this.addLayer(new PaintLayer(this));
+        this.addLayer(new EquipmentLayer(this, context.getItemInHandRenderer()));
     }
 
     @Override

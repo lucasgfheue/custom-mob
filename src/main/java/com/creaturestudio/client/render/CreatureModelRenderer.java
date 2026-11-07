@@ -187,6 +187,61 @@ public final class CreatureModelRenderer {
         }
     }
 
+    /**
+     * Caja con una textura de piel de Minecraft (como la de las armaduras, 64x32): la zona de caja que empieza en
+     * (u, v) con tamano bw x bh x bd se estira sobre la caja dada. "mirror" la refleja como las piezas izquierdas
+     * de Minecraft. La caja esta en el espacio de la pieza; partMat es su matriz animada.
+     */
+    public static void renderSkinBox(Matrix4f partMat, PoseStack.Pose root, VertexConsumer vc,
+                                     float x0, float y0, float z0, float x1, float y1, float z1,
+                                     int u, int v, int bw, int bh, int bd, boolean mirror, float texW, float texH,
+                                     int color, int light, int overlay) {
+        Matrix4f m = new Matrix4f();
+        root.pose().mul(partMat, m);
+        Matrix3f rotation = new Matrix3f();
+        partMat.get3x3(rotation);
+        Matrix3f normal = new Matrix3f();
+        root.normal().mul(rotation, normal);
+        for (int f = 0; f < PaintLayout.FACES; f++) {
+            boolean side = f == PaintLayout.LEFT || f == PaintLayout.RIGHT;
+            boolean cap = f == PaintLayout.TOP || f == PaintLayout.BOTTOM;
+            float a = side ? z1 - z0 : x1 - x0;
+            float b = cap ? z1 - z0 : y1 - y0;
+            if (a <= 0f || b <= 0f) {
+                continue;
+            }
+            int src = mirror ? PaintLayout.mirrored(f) : f;
+            int[] r = PaintLayout.region(src, bw, bh, bd);
+            float u0 = (u + r[0]) / texW;
+            float u1 = (u + r[0] + r[2]) / texW;
+            float v0 = (v + r[1]) / texH;
+            float v1 = (v + r[1] + r[3]) / texH;
+            if (mirror) {
+                float t = u0;
+                u0 = u1;
+                u1 = t;
+            }
+            if (f == PaintLayout.BOTTOM) {
+                float t = v0;
+                v0 = v1;
+                v1 = t;
+            }
+            float[] fr = PaintLayout.frame(f, x0, y0, z0, x1, y1, z1);
+            Vector3f n = normal.transform(fr[9], fr[10], fr[11], NORMAL);
+            if (n.lengthSquared() > 1.0e-12f) {
+                n.normalize();
+            }
+            float nx = n.x();
+            float ny = n.y();
+            float nz = n.z();
+            vertex(vc, m, fr[0], fr[1], fr[2], color, u0, v0, overlay, light, nx, ny, nz);
+            vertex(vc, m, fr[0] + fr[6], fr[1] + fr[7], fr[2] + fr[8], color, u0, v1, overlay, light, nx, ny, nz);
+            vertex(vc, m, fr[0] + fr[3] + fr[6], fr[1] + fr[4] + fr[7], fr[2] + fr[5] + fr[8], color, u1, v1,
+                    overlay, light, nx, ny, nz);
+            vertex(vc, m, fr[0] + fr[3], fr[1] + fr[4], fr[2] + fr[5], color, u1, v0, overlay, light, nx, ny, nz);
+        }
+    }
+
     /** Cubo morado que se ve mientras llega la definicion desde el servidor. */
     public static void renderPlaceholder(PoseStack.Pose root, VertexConsumer vc, int light, int overlay) {
         TextureAtlasSprite sprite = Materials.sprite(MaterialIds.SOLID);

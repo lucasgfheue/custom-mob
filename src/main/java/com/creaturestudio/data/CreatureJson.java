@@ -58,11 +58,98 @@ public final class CreatureJson {
         o.addProperty("burnsInSun", d.burnsInSun);
         o.addProperty("temptItem", d.temptItem);
 
-        JsonObject drop = new JsonObject();
-        drop.addProperty("item", d.dropItem);
-        drop.addProperty("min", d.dropMin);
-        drop.addProperty("max", d.dropMax);
-        o.add("drop", drop);
+        JsonObject respawn = new JsonObject();
+        respawn.addProperty("enabled", d.respawn);
+        respawn.addProperty("time", d.respawnTime.name());
+        respawn.addProperty("delay", d.respawnDelay);
+        respawn.addProperty("atHome", d.respawnAtHome);
+        respawn.addProperty("limit", d.respawnLimit);
+        o.add("respawn", respawn);
+
+        JsonObject melee = new JsonObject();
+        melee.addProperty("reach", d.meleeReach);
+        melee.addProperty("interval", d.meleeInterval);
+        melee.addProperty("knockback", d.meleeKnockback);
+        o.add("melee", melee);
+
+        JsonObject ranged = new JsonObject();
+        ranged.addProperty("accuracy", d.rangedAccuracy);
+        ranged.addProperty("shots", d.shotCount);
+        ranged.addProperty("range", d.rangedRange);
+        ranged.addProperty("meleeRange", d.rangedMeleeRange);
+        ranged.addProperty("minDelay", d.rangedMinDelay);
+        ranged.addProperty("maxDelay", d.rangedMaxDelay);
+        ranged.addProperty("burst", d.burstCount);
+        ranged.addProperty("burstRate", d.burstRate);
+        ranged.addProperty("fireSound", d.fireSound.name());
+        ranged.addProperty("hitSound", d.hitSound.name());
+        ranged.addProperty("groundSound", d.groundSound.name());
+        ranged.addProperty("aim", d.aimWhileShooting);
+        ranged.addProperty("indirect", d.indirect.name());
+        o.add("rangedAttack", ranged);
+
+        JsonObject proj = new JsonObject();
+        proj.addProperty("item", d.projItem);
+        proj.addProperty("strength", d.projStrength);
+        proj.addProperty("size", d.projSize);
+        proj.addProperty("speed", d.projSpeed);
+        proj.addProperty("gravity", d.projGravity);
+        proj.addProperty("accelerate", d.projAccelerate);
+        proj.addProperty("explode", d.projExplode.name());
+        proj.addProperty("effect", d.projEffect.name());
+        proj.addProperty("trail", d.projTrail.name());
+        proj.addProperty("glows", d.projGlows);
+        proj.addProperty("knockback", d.projKnockback);
+        proj.addProperty("3d", d.proj3D);
+        proj.addProperty("spins", d.projSpins);
+        proj.addProperty("sticks", d.projSticks);
+        o.add("projectile", proj);
+
+        JsonObject resist = new JsonObject();
+        resist.addProperty("arrow", d.resistArrow);
+        resist.addProperty("melee", d.resistMelee);
+        resist.addProperty("explosion", d.resistExplosion);
+        o.add("resist", resist);
+
+        JsonObject regen = new JsonObject();
+        regen.addProperty("health", d.healthRegen);
+        regen.addProperty("combat", d.combatRegen);
+        o.add("regen", regen);
+
+        JsonObject vision = new JsonObject();
+        vision.addProperty("range", d.visionRange);
+        vision.addProperty("throughWalls", d.seeThroughWalls);
+        vision.addProperty("wallRange", d.wallRange);
+        o.add("vision", vision);
+
+        JsonObject flags = new JsonObject();
+        flags.addProperty("canDrown", d.canDrown);
+        flags.addProperty("noFallDamage", d.noFallDamage);
+        flags.addProperty("cobweb", d.cobwebAffected);
+        flags.addProperty("potionImmune", d.potionImmune);
+        o.add("flags", flags);
+
+        JsonObject equip = new JsonObject();
+        equip.addProperty("head", d.equipHead);
+        equip.addProperty("chest", d.equipChest);
+        equip.addProperty("legs", d.equipLegs);
+        equip.addProperty("feet", d.equipFeet);
+        equip.addProperty("mainHand", d.equipMainHand);
+        equip.addProperty("offHand", d.equipOffHand);
+        equip.addProperty("shield", d.equipShield);
+        equip.addProperty("dropChance", d.equipDropChance);
+        o.add("equipment", equip);
+
+        JsonArray drops = new JsonArray();
+        for (CreatureDrop drop : d.drops) {
+            JsonObject j = new JsonObject();
+            j.addProperty("item", drop.item);
+            j.addProperty("min", drop.min);
+            j.addProperty("max", drop.max);
+            j.addProperty("chance", drop.chance);
+            drops.add(j);
+        }
+        o.add("drops", drops);
 
         JsonObject spawn = new JsonObject();
         spawn.addProperty("natural", d.naturalSpawn);
@@ -148,11 +235,119 @@ public final class CreatureJson {
         d.burnsInSun = bool(o, "burnsInSun", false);
         d.temptItem = str(o, "temptItem", "");
 
+        // Version anterior: un solo objeto de botin
         JsonObject drop = obj(o, "drop");
-        if (drop != null) {
-            d.dropItem = str(drop, "item", "");
-            d.dropMin = integer(drop, "min", d.dropMin);
-            d.dropMax = integer(drop, "max", d.dropMax);
+        if (drop != null && !o.has("drops")) {
+            String item = str(drop, "item", "");
+            int max = integer(drop, "max", 1);
+            if (!item.isBlank() && max > 0) {
+                d.drops.add(new CreatureDrop(item, integer(drop, "min", 0), max, 100));
+            }
+        }
+        if (o.has("drops") && o.get("drops").isJsonArray()) {
+            for (JsonElement e : o.getAsJsonArray("drops")) {
+                if (e.isJsonObject() && d.drops.size() < CreatureDefinition.MAX_DROPS) {
+                    JsonObject j = e.getAsJsonObject();
+                    d.drops.add(new CreatureDrop(str(j, "item", ""), integer(j, "min", 1), integer(j, "max", 1),
+                            integer(j, "chance", 100)));
+                }
+            }
+        }
+
+        JsonObject respawn = obj(o, "respawn");
+        if (respawn != null) {
+            d.respawn = bool(respawn, "enabled", false);
+            d.respawnTime = enumValue(respawn, "time", SpawnTime.class, d.respawnTime);
+            d.respawnDelay = integer(respawn, "delay", d.respawnDelay);
+            d.respawnAtHome = bool(respawn, "atHome", false);
+            d.respawnLimit = integer(respawn, "limit", 0);
+        }
+
+        JsonObject melee = obj(o, "melee");
+        if (melee != null) {
+            d.meleeReach = num(melee, "reach", d.meleeReach);
+            d.meleeInterval = integer(melee, "interval", d.meleeInterval);
+            d.meleeKnockback = num(melee, "knockback", d.meleeKnockback);
+        }
+
+        JsonObject ranged = obj(o, "rangedAttack");
+        JsonObject proj = obj(o, "projectile");
+        if (proj == null) {
+            // Criatura de una version anterior: el proyectil sale de su tipo de ataque
+            RangedPresets.apply(d, d.ranged);
+        }
+        if (ranged != null) {
+            d.rangedAccuracy = integer(ranged, "accuracy", d.rangedAccuracy);
+            d.shotCount = integer(ranged, "shots", d.shotCount);
+            d.rangedRange = num(ranged, "range", d.rangedRange);
+            d.rangedMeleeRange = num(ranged, "meleeRange", d.rangedMeleeRange);
+            d.rangedMinDelay = integer(ranged, "minDelay", d.rangedMinDelay);
+            d.rangedMaxDelay = integer(ranged, "maxDelay", d.rangedMaxDelay);
+            d.burstCount = integer(ranged, "burst", d.burstCount);
+            d.burstRate = integer(ranged, "burstRate", d.burstRate);
+            d.fireSound = enumValue(ranged, "fireSound", ShotSound.class, d.fireSound);
+            d.hitSound = enumValue(ranged, "hitSound", ShotSound.class, d.hitSound);
+            d.groundSound = enumValue(ranged, "groundSound", ShotSound.class, d.groundSound);
+            d.aimWhileShooting = bool(ranged, "aim", true);
+            d.indirect = enumValue(ranged, "indirect", IndirectFire.class, d.indirect);
+        }
+        if (proj != null) {
+            d.projItem = str(proj, "item", d.projItem);
+            d.projStrength = num(proj, "strength", d.projStrength);
+            d.projSize = integer(proj, "size", d.projSize);
+            d.projSpeed = integer(proj, "speed", d.projSpeed);
+            d.projGravity = bool(proj, "gravity", d.projGravity);
+            d.projAccelerate = bool(proj, "accelerate", d.projAccelerate);
+            d.projExplode = enumValue(proj, "explode", ExplosionSize.class, d.projExplode);
+            d.projEffect = enumValue(proj, "effect", HitEffect.class, d.projEffect);
+            d.projTrail = enumValue(proj, "trail", TrailType.class, d.projTrail);
+            d.projGlows = bool(proj, "glows", d.projGlows);
+            d.projKnockback = num(proj, "knockback", d.projKnockback);
+            d.proj3D = bool(proj, "3d", d.proj3D);
+            d.projSpins = bool(proj, "spins", d.projSpins);
+            d.projSticks = bool(proj, "sticks", d.projSticks);
+        }
+
+        JsonObject resist = obj(o, "resist");
+        if (resist != null) {
+            d.resistArrow = integer(resist, "arrow", 0);
+            d.resistMelee = integer(resist, "melee", 0);
+            d.resistExplosion = integer(resist, "explosion", 0);
+        }
+
+        JsonObject regen = obj(o, "regen");
+        if (regen != null) {
+            d.healthRegen = num(regen, "health", 0f);
+            d.combatRegen = num(regen, "combat", 0f);
+        }
+
+        JsonObject vision = obj(o, "vision");
+        if (vision != null) {
+            d.visionRange = num(vision, "range", d.visionRange);
+            d.seeThroughWalls = bool(vision, "throughWalls", false);
+            d.wallRange = num(vision, "wallRange", d.wallRange);
+        } else {
+            d.visionRange = d.followRange; // antes la vision era el rango de seguimiento
+        }
+
+        JsonObject flags = obj(o, "flags");
+        if (flags != null) {
+            d.canDrown = bool(flags, "canDrown", true);
+            d.noFallDamage = bool(flags, "noFallDamage", false);
+            d.cobwebAffected = bool(flags, "cobweb", true);
+            d.potionImmune = bool(flags, "potionImmune", false);
+        }
+
+        JsonObject equip = obj(o, "equipment");
+        if (equip != null) {
+            d.equipHead = str(equip, "head", "");
+            d.equipChest = str(equip, "chest", "");
+            d.equipLegs = str(equip, "legs", "");
+            d.equipFeet = str(equip, "feet", "");
+            d.equipMainHand = str(equip, "mainHand", "");
+            d.equipOffHand = str(equip, "offHand", "");
+            d.equipShield = str(equip, "shield", "");
+            d.equipDropChance = integer(equip, "dropChance", 0);
         }
 
         JsonObject spawn = obj(o, "spawn");

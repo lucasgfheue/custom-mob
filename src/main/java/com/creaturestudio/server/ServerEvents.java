@@ -37,5 +37,6 @@ public final class ServerEvents {
 
     private static void onServerTick(ServerTickEvent.Post event) {
         NaturalSpawner.tick(event.getServer());
+        RespawnData.tick(event.getServer());
     }
 }
