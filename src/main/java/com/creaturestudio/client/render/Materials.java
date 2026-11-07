@@ -36,6 +36,7 @@ public final class Materials {
             new Preset(MaterialIds.EYE_CUTE, "eye_cute"),
             new Preset(MaterialIds.MOUTH, "mouth"),
             new Preset(MaterialIds.TEETH, "teeth"),
+            new Preset(MaterialIds.CLEAR, "clear"),
             new Preset("minecraft:block/white_wool", "wool"),
             new Preset("minecraft:block/white_concrete", "concrete"),
             new Preset("minecraft:block/white_concrete_powder", "concrete_powder"),

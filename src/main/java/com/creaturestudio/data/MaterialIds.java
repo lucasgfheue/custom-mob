@@ -17,6 +17,8 @@ public final class MaterialIds {
     public static final String EYE_CUTE = "creaturestudio:block/eye_cute";
     public static final String MOUTH = "creaturestudio:block/mouth";
     public static final String TEETH = "creaturestudio:block/teeth";
+    /** Totalmente transparente: solo se ve lo que se pinte encima. */
+    public static final String CLEAR = "creaturestudio:block/clear";
 
     private MaterialIds() {
     }

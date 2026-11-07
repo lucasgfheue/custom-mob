@@ -2,13 +2,16 @@ package com.creaturestudio.client.screen;
 
 import com.creaturestudio.client.ClientFiles;
 import com.creaturestudio.client.render.AnimState;
+import com.creaturestudio.client.render.PaintCache;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureStore;
+import com.creaturestudio.data.Movement;
 import com.creaturestudio.data.Templates;
 import com.creaturestudio.network.Payloads;
 import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -21,9 +24,16 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Pantalla principal: lista de criaturas del mundo con vista previa y acciones. */
+/**
+ * Pantalla principal del estudio.
+ * Izquierda: "Mis criaturas" con los botones Nueva, Importar y Abrir carpeta.
+ * Derecha: vista previa de la criatura elegida y, debajo, todo lo que se puede hacer con ella.
+ */
 public class LibraryScreen extends Screen {
     private static final int ROW_H = 14;
+    private static final int TITLE_H = 22;
+    private static final int MARGIN = 6;
+    private static final int BTN_H = 20;
 
     private List<CreatureDefinition> creatures = new ArrayList<>();
     @Nullable
@@ -36,8 +46,23 @@ public class LibraryScreen extends Screen {
     private String fittedId;
     private int fittedRevision = -1;
 
-    private int listX, listY, listW, listH;
-    private Button editButton, duplicateButton, deleteButton, eggButton, summonButton, exportButton;
+    private int listX;
+    private int listY;
+    private int listW;
+    private int listH;
+    private int headerY;
+    @Nullable
+    private Button editButton;
+    @Nullable
+    private Button duplicateButton;
+    @Nullable
+    private Button deleteButton;
+    @Nullable
+    private Button eggButton;
+    @Nullable
+    private Button summonButton;
+    @Nullable
+    private Button exportButton;
 
     private boolean dragging;
     private int dragButton;
@@ -57,39 +82,53 @@ public class LibraryScreen extends Screen {
     @Override
     protected void init() {
         reloadList();
-        int margin = 6;
-        listX = margin;
-        listY = 24;
-        listW = Mth.clamp(width / 3, 120, 190);
-        listH = height - listY - 52;
-        int px = listX + listW + 6;
-        preview.setArea(px, listY, width - px - margin, listH);
+        listX = MARGIN;
+        listW = Mth.clamp(width / 3, 130, 200);
+        int px = listX + listW + MARGIN;
+        int pw = width - px - MARGIN;
 
-        int rowY1 = height - 46;
-        int rowY2 = height - 24;
-        int gap = 4;
-        int bw = (width - margin * 2 - gap * 4) / 5;
-        int x = margin;
-        addRenderableWidget(Button.builder(Ui.tr("library.new"), b -> openNew()).bounds(x, rowY1, bw, 20).build());
-        editButton = addRenderableWidget(Button.builder(Ui.tr("library.edit"), b -> openEdit())
-                .bounds(x + (bw + gap), rowY1, bw, 20).build());
-        duplicateButton = addRenderableWidget(Button.builder(Ui.tr("library.duplicate"), b -> duplicate())
-                .bounds(x + (bw + gap) * 2, rowY1, bw, 20).build());
-        deleteButton = addRenderableWidget(Button.builder(Ui.tr("library.delete"), b -> confirmDelete())
-                .bounds(x + (bw + gap) * 3, rowY1, bw, 20).build());
+        Component closeText = Ui.tr("library.close");
+        int wClose = Math.max(50, font.width(closeText) + 16);
+        addRenderableWidget(Button.builder(closeText, b -> onClose())
+                .bounds(width - MARGIN - wClose, 3, wClose, 16).build());
+
+        // Columna izquierda: la coleccion
+        headerY = TITLE_H + 6;
+        int y = headerY + 12;
+        addRenderableWidget(Button.builder(Ui.tr("library.new"), b -> openNew())
+                .bounds(listX, y, listW, BTN_H).tooltip(Tooltip.create(Ui.tr("library.new_tooltip"))).build());
+        y += BTN_H + 4;
+        listY = y;
+        int bottom = height - MARGIN - BTN_H;
+        listH = Math.max(ROW_H * 2 + 4, bottom - 4 - listY);
+        int half = (listW - 4) / 2;
         addRenderableWidget(Button.builder(Ui.tr("library.import"), b -> minecraft.setScreen(new ImportScreen(this)))
-                .bounds(x + (bw + gap) * 4, rowY1, bw, 20).build());
-
-        eggButton = addRenderableWidget(Button.builder(Ui.tr("library.egg"), b -> giveEgg())
-                .bounds(x, rowY2, bw, 20).build());
-        summonButton = addRenderableWidget(Button.builder(Ui.tr("library.summon"), b -> summon())
-                .bounds(x + (bw + gap), rowY2, bw, 20).build());
-        exportButton = addRenderableWidget(Button.builder(Ui.tr("library.export"), b -> export())
-                .bounds(x + (bw + gap) * 2, rowY2, bw, 20).build());
+                .bounds(listX, bottom, half, BTN_H).tooltip(Tooltip.create(Ui.tr("library.import_tooltip"))).build());
         addRenderableWidget(Button.builder(Ui.tr("library.folder"), b -> ClientFiles.openFolder())
-                .bounds(x + (bw + gap) * 3, rowY2, bw, 20).build());
-        addRenderableWidget(Button.builder(Ui.tr("library.close"), b -> onClose())
-                .bounds(x + (bw + gap) * 4, rowY2, bw, 20).build());
+                .bounds(listX + half + 4, bottom, listW - half - 4, BTN_H)
+                .tooltip(Tooltip.create(Ui.tr("library.folder_tooltip"))).build());
+
+        // Columna derecha: la criatura elegida
+        int row2 = height - MARGIN - BTN_H;
+        int row1 = row2 - BTN_H - 4;
+        int previewTop = TITLE_H + 6;
+        preview.setArea(px, previewTop, pw, Math.max(40, row1 - 6 - previewTop));
+        int bw = (pw - 8) / 3;
+        int x2 = px + bw + 4;
+        int x3 = px + (bw + 4) * 2;
+        int w3 = pw - (bw + 4) * 2;
+        editButton = addRenderableWidget(Button.builder(Ui.tr("library.edit"), b -> openEdit())
+                .bounds(px, row1, bw, BTN_H).tooltip(Tooltip.create(Ui.tr("library.edit_tooltip"))).build());
+        duplicateButton = addRenderableWidget(Button.builder(Ui.tr("library.duplicate"), b -> duplicate())
+                .bounds(x2, row1, bw, BTN_H).tooltip(Tooltip.create(Ui.tr("library.duplicate_tooltip"))).build());
+        deleteButton = addRenderableWidget(Button.builder(Ui.tr("library.delete"), b -> confirmDelete())
+                .bounds(x3, row1, w3, BTN_H).build());
+        eggButton = addRenderableWidget(Button.builder(Ui.tr("library.egg"), b -> giveEgg())
+                .bounds(px, row2, bw, BTN_H).tooltip(Tooltip.create(Ui.tr("library.egg_tooltip"))).build());
+        summonButton = addRenderableWidget(Button.builder(Ui.tr("library.summon"), b -> summon())
+                .bounds(x2, row2, bw, BTN_H).tooltip(Tooltip.create(Ui.tr("library.summon_tooltip"))).build());
+        exportButton = addRenderableWidget(Button.builder(Ui.tr("library.export"), b -> export())
+                .bounds(x3, row2, w3, BTN_H).tooltip(Tooltip.create(Ui.tr("library.export_tooltip"))).build());
         updateButtons();
     }
 
@@ -146,10 +185,11 @@ public class LibraryScreen extends Screen {
     }
 
     private void updateButtons() {
-        boolean has = selected() != null;
-        if (editButton == null) {
+        if (editButton == null || duplicateButton == null || deleteButton == null || eggButton == null
+                || summonButton == null || exportButton == null) {
             return;
         }
+        boolean has = selected() != null;
         editButton.active = has;
         duplicateButton.active = has;
         deleteButton.active = has;
@@ -236,8 +276,8 @@ public class LibraryScreen extends Screen {
     @Override
     public void renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         g.fill(0, 0, width, height, Ui.BG);
-        g.fill(0, 0, width, 20, Ui.PANEL_DARK);
-        g.hLine(0, width, 20, Ui.BORDER);
+        g.fill(0, 0, width, TITLE_H, Ui.PANEL_DARK);
+        g.hLine(0, width, TITLE_H - 1, Ui.BORDER);
 
         Ui.panel(g, listX, listY, listW, listH);
         int visible = Math.max(1, (listH - 4) / ROW_H);
@@ -258,8 +298,15 @@ public class LibraryScreen extends Screen {
             g.drawString(font, name, listX + 16, y + 3, sel ? 0xFFFFFFFF : Ui.TEXT, false);
         }
         g.disableScissor();
+        if (creatures.size() > visible) {
+            int trackH = listH - 4;
+            int barH = Math.max(8, trackH * visible / creatures.size());
+            int barY = listY + 2 + (trackH - barH) * scroll / Math.max(1, creatures.size() - visible);
+            g.fill(listX + listW - 4, barY, listX + listW - 2, barY + barH, 0xFF6A7080);
+        }
 
-        g.fillGradient(preview.x, preview.y, preview.x + preview.w, preview.y + preview.h, Ui.PREVIEW_TOP, Ui.PREVIEW_BOTTOM);
+        g.fillGradient(preview.x, preview.y, preview.x + preview.w, preview.y + preview.h, Ui.PREVIEW_TOP,
+                Ui.PREVIEW_BOTTOM);
         g.renderOutline(preview.x, preview.y, preview.w, preview.h, Ui.BORDER);
         CreatureDefinition d = selected();
         if (d != null && !d.parts.isEmpty()) {
@@ -274,15 +321,16 @@ public class LibraryScreen extends Screen {
             }
             float t = (now % 1_000_000L) / 50f;
             AnimState anim = new AnimState(t * 0.35f, 0.6f, t, Mth.sin(t * 0.04f) * 15f, 0f, 0f,
-                    d.movement == com.creaturestudio.data.Movement.FLY);
-            preview.render(g, d, anim, -1, true);
+                    d.movement == Movement.FLY);
+            preview.render(g, d, anim, -1, true, PaintCache.get(d));
         }
     }
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         super.render(g, mouseX, mouseY, partialTick);
-        g.drawCenteredString(font, title, width / 2, 6, Ui.TEXT);
+        g.drawString(font, title, MARGIN, 7, Ui.TEXT, false);
+        g.drawString(font, Ui.tr("library.my_creatures", creatures.size()), listX, headerY, Ui.MUTED, false);
 
         if (creatures.isEmpty()) {
             Ui.wrapped(g, font, Ui.tr("library.empty"), listX + 6, listY + 8, listW - 12, Ui.MUTED);
@@ -305,10 +353,18 @@ public class LibraryScreen extends Screen {
             Ui.wrapped(g, font, Ui.tr("library.no_selection"), ix, iy, preview.w - 12, Ui.MUTED);
         }
 
-        g.drawString(font, Ui.tr("library.hint"), preview.x + 6, preview.y + preview.h - 12, 0xFF6C7380, false);
+        int hintY = preview.y + preview.h - 12;
+        String hint = font.plainSubstrByWidth(Ui.tr("library.hint").getString(), Math.max(10, preview.w - 12));
+        g.drawString(font, hint, preview.x + 6, hintY, 0xFF6C7380, false);
 
         if (status != null && Util.getMillis() < statusUntil) {
-            g.drawCenteredString(font, status, width / 2, height - 58, statusColor);
+            String s = font.plainSubstrByWidth(status.getString(), Math.max(10, preview.w - 20));
+            int sw = font.width(s) + 12;
+            int sx = preview.x + (preview.w - sw) / 2;
+            int sy = hintY - 18;
+            g.fill(sx, sy, sx + sw, sy + 14, 0xD0101216);
+            g.renderOutline(sx, sy, sw, 14, statusColor);
+            g.drawString(font, s, sx + 6, sy + 3, statusColor, false);
         }
     }
 
@@ -323,7 +379,7 @@ public class LibraryScreen extends Screen {
         }
         if (Ui.inside(mouseX, mouseY, listX, listY, listW, listH)) {
             int row = (int) ((mouseY - listY - 2) / ROW_H) + scroll;
-            if (row >= 0 && row < creatures.size()) {
+            if (row >= 0 && row < creatures.size() && mouseY >= listY + 2) {
                 String id = creatures.get(row).id;
                 long now = Util.getMillis();
                 boolean doubleClick = row == lastClickIndex && now - lastClickTime < 350;
@@ -388,11 +444,13 @@ public class LibraryScreen extends Screen {
         int index = selectedIndex();
         if (keyCode == 264 && index + 1 < creatures.size()) { // flecha abajo
             selectedId = creatures.get(index + 1).id;
+            ensureVisible(index + 1);
             updateButtons();
             return true;
         }
         if (keyCode == 265 && index > 0) { // flecha arriba
             selectedId = creatures.get(index - 1).id;
+            ensureVisible(index - 1);
             updateButtons();
             return true;
         }
@@ -401,6 +459,15 @@ public class LibraryScreen extends Screen {
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private void ensureVisible(int row) {
+        int visible = Math.max(1, (listH - 4) / ROW_H);
+        if (row < scroll) {
+            scroll = row;
+        } else if (row >= scroll + visible) {
+            scroll = row - visible + 1;
+        }
     }
 
     @Override

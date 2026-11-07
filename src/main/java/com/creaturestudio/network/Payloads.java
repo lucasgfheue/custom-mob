@@ -17,11 +17,18 @@ public final class Payloads {
         return new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath(CreatureStudio.MODID, path));
     }
 
-    /** Guardar (crear o actualizar) una criatura. Contiene el JSON comprimido. */
-    public record SaveCreature(byte[] data) implements CustomPacketPayload {
+    /**
+     * Guardar (crear o actualizar) una criatura: el JSON comprimido se envia en trozos de menos de 32 KiB
+     * (index de 0 a total-1, todos con el mismo numero de envio).
+     */
+    public record SaveCreature(int transfer, int index, int total, byte[] data) implements CustomPacketPayload {
         public static final Type<SaveCreature> TYPE = typeOf("save_creature");
-        public static final StreamCodec<ByteBuf, SaveCreature> STREAM_CODEC =
-                StreamCodec.composite(ByteBufCodecs.BYTE_ARRAY, SaveCreature::data, SaveCreature::new);
+        public static final StreamCodec<ByteBuf, SaveCreature> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, SaveCreature::transfer,
+                ByteBufCodecs.VAR_INT, SaveCreature::index,
+                ByteBufCodecs.VAR_INT, SaveCreature::total,
+                ByteBufCodecs.BYTE_ARRAY, SaveCreature::data,
+                SaveCreature::new);
 
         @Override
         public Type<? extends CustomPacketPayload> type() {

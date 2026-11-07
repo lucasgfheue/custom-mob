@@ -12,7 +12,7 @@ import java.util.zip.InflaterInputStream;
 /** Empaqueta definiciones como JSON comprimido para enviarlas por la red. */
 public final class DefCodec {
     /** Limite de seguridad al descomprimir (evita "bombas zip"). */
-    private static final int MAX_JSON_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_JSON_BYTES = 8 * 1024 * 1024;
 
     private DefCodec() {
     }

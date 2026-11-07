@@ -3,6 +3,7 @@ package com.creaturestudio.client.render;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreaturePart;
 import com.creaturestudio.data.MaterialIds;
+import com.creaturestudio.data.PaintLayout;
 import com.creaturestudio.data.PartAnim;
 import com.creaturestudio.data.PoseSolver;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -122,6 +123,67 @@ public final class CreatureModelRenderer {
             int color = multiply(0xFF000000 | p.color, tint);
             drawBox(vc, m, normal, p.x, p.y, p.z, p.x + p.w, p.y + p.h, p.z + p.d, sprite, p.stretch, color,
                     p.glow ? LightTexture.FULL_BRIGHT : light, overlay);
+        }
+    }
+
+    /** Separacion de la pintura respecto a la cara (en pixeles) para que no parpadee con la textura de debajo. */
+    private static final float PAINT_OFFSET = 0.05f;
+
+    /**
+     * Dibuja la pintura a mano encima del modelo (con la textura de {@link PaintAtlas}).
+     * Debe usar las mismas matrices que el dibujado normal.
+     */
+    public static void renderPaint(CreatureDefinition def, Matrix4f[] mats, PoseStack.Pose root, VertexConsumer vc,
+                                   int light, int overlay, int tint, PaintAtlas atlas) {
+        Matrix4f m = new Matrix4f();
+        Matrix3f rotation = new Matrix3f();
+        Matrix3f normal = new Matrix3f();
+        float aw = atlas.width();
+        float ah = atlas.height();
+        List<CreaturePart> parts = def.parts;
+        for (int i = 0; i < parts.size() && i < mats.length; i++) {
+            if (!atlas.has(i)) {
+                continue;
+            }
+            CreaturePart p = parts.get(i);
+            root.pose().mul(mats[i], m);
+            mats[i].get3x3(rotation);
+            root.normal().mul(rotation, normal);
+            int lt = p.glow ? LightTexture.FULL_BRIGHT : light;
+            float e = PAINT_OFFSET;
+            float x0 = p.x - e;
+            float y0 = p.y - e;
+            float z0 = p.z - e;
+            float x1 = p.x + p.w + e;
+            float y1 = p.y + p.h + e;
+            float z1 = p.z + p.d + e;
+            for (int f = 0; f < PaintLayout.FACES; f++) {
+                boolean side = f == PaintLayout.LEFT || f == PaintLayout.RIGHT;
+                boolean cap = f == PaintLayout.TOP || f == PaintLayout.BOTTOM;
+                float a = side ? p.d : p.w;
+                float b = cap ? p.d : p.h;
+                if (a <= 0f || b <= 0f) {
+                    continue;
+                }
+                int[] r = PaintLayout.region(f, p.pw, p.ph, p.pd);
+                float u0 = (atlas.slotX(i) + r[0]) / aw;
+                float u1 = (atlas.slotX(i) + r[0] + r[2]) / aw;
+                float v0 = (atlas.slotY(i) + r[1]) / ah;
+                float v1 = (atlas.slotY(i) + r[1] + r[3]) / ah;
+                float[] fr = PaintLayout.frame(f, x0, y0, z0, x1, y1, z1);
+                Vector3f n = normal.transform(fr[9], fr[10], fr[11], NORMAL);
+                if (n.lengthSquared() > 1.0e-12f) {
+                    n.normalize();
+                }
+                float nx = n.x();
+                float ny = n.y();
+                float nz = n.z();
+                vertex(vc, m, fr[0], fr[1], fr[2], tint, u0, v0, overlay, lt, nx, ny, nz);
+                vertex(vc, m, fr[0] + fr[6], fr[1] + fr[7], fr[2] + fr[8], tint, u0, v1, overlay, lt, nx, ny, nz);
+                vertex(vc, m, fr[0] + fr[3] + fr[6], fr[1] + fr[4] + fr[7], fr[2] + fr[5] + fr[8], tint, u1, v1,
+                        overlay, lt, nx, ny, nz);
+                vertex(vc, m, fr[0] + fr[3], fr[1] + fr[4], fr[2] + fr[5], tint, u1, v0, overlay, lt, nx, ny, nz);
+            }
         }
     }
 

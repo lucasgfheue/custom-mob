@@ -16,6 +16,8 @@ import java.util.UUID;
  */
 public class CreatureDefinition {
     public static final int MAX_PARTS = 128;
+    /** Maximo de texels pintados a mano por criatura (sumando todas las piezas). */
+    public static final int MAX_PAINT_TEXELS = 160_000;
     public static final int NAME_MAX = 32;
 
     public String id = "";
@@ -233,6 +235,43 @@ public class CreatureDefinition {
             p.animAmount = clamp(p.animAmount, 0f, 5f);
             p.animSpeed = clamp(p.animSpeed, 0f, 5f);
         }
+        sanitizePaint();
+    }
+
+    /** Pintura: alfa 0 o 255 (como las texturas de recorte), sin capas vacias y con un limite total. */
+    private void sanitizePaint() {
+        int budget = MAX_PAINT_TEXELS;
+        for (CreaturePart p : parts) {
+            if (!p.validPaint()) {
+                p.clearPaint();
+                continue;
+            }
+            boolean any = false;
+            for (int i = 0; i < p.paint.length; i++) {
+                int c = p.paint[i];
+                if ((c >>> 24) < 128) {
+                    p.paint[i] = 0;
+                } else {
+                    p.paint[i] = 0xFF000000 | (c & 0xFFFFFF);
+                    any = true;
+                }
+            }
+            if (!any || p.paint.length > budget) {
+                p.clearPaint();
+            } else {
+                budget -= p.paint.length;
+            }
+        }
+    }
+
+    /** true si alguna pieza tiene pintura a mano. */
+    public boolean hasPaint() {
+        for (CreaturePart p : parts) {
+            if (p.hasPaint()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ---------------------------------------------------------------------------------------

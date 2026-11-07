@@ -1,6 +1,7 @@
 package com.creaturestudio.client;
 
 import com.creaturestudio.client.render.CustomCreatureRenderer;
+import com.creaturestudio.client.render.PaintCache;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureStore;
 import com.creaturestudio.item.CreatureEggItem;
@@ -76,5 +77,7 @@ public final class ClientSetup {
 
     private static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         CreatureStore.CLIENT.clear();
+        PaintCache.clear();
+        VanillaModels.clearCache();
     }
 }

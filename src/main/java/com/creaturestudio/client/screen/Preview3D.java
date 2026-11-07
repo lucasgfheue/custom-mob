@@ -2,8 +2,10 @@ package com.creaturestudio.client.screen;
 
 import com.creaturestudio.client.render.AnimState;
 import com.creaturestudio.client.render.CreatureModelRenderer;
+import com.creaturestudio.client.render.PaintAtlas;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreaturePart;
+import com.creaturestudio.data.PaintLayout;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -17,6 +19,7 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.util.Mth;
+import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.opengl.GL11;
@@ -87,6 +90,21 @@ public class Preview3D {
         ps.translate(-center[0], -center[1], -center[2]);
     }
 
+    /** Matriz del modelo a la pantalla (la vista no tiene perspectiva). */
+    public Matrix4f viewMatrix() {
+        return matrix();
+    }
+
+    /**
+     * Proyecta a la pantalla un punto de una pieza (coordenadas del modelo en reposo): {x, y, profundidad}.
+     * Una profundidad mayor esta mas cerca de la camara.
+     */
+    public static float[] project(Matrix4f view, Matrix4f part, float x, float y, float z) {
+        Vector3f v = part.transformPosition(x, y, z, new Vector3f());
+        view.transformPosition(v);
+        return new float[]{v.x, v.y, v.z};
+    }
+
     /** La misma transformacion que {@link #apply} pero como matriz JOML (para seleccionar piezas). */
     private Matrix4f matrix() {
         return new Matrix4f()
@@ -99,6 +117,11 @@ public class Preview3D {
     }
 
     public void render(GuiGraphics g, CreatureDefinition def, AnimState anim, int selected, boolean grid) {
+        render(g, def, anim, selected, grid, null);
+    }
+
+    public void render(GuiGraphics g, CreatureDefinition def, AnimState anim, int selected, boolean grid,
+                       @Nullable PaintAtlas paint) {
         g.enableScissor(x, y, x + w, y + h);
         PoseStack ps = g.pose();
         ps.pushPose();
@@ -109,6 +132,12 @@ public class Preview3D {
         PoseStack.Pose pose = ps.last();
         Matrix4f[] mats = CreatureModelRenderer.pose(def, anim);
         CreatureModelRenderer.renderPosed(def, mats, pose, vc, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, -1);
+        if (paint != null) {
+            VertexConsumer paintVc = buffers.getBuffer(RenderType.entityCutoutNoCull(paint.location()));
+            CreatureModelRenderer.renderPaint(def, mats, pose, paintVc, LightTexture.FULL_BRIGHT,
+                    OverlayTexture.NO_OVERLAY, -1, paint);
+            vc = buffers.getBuffer(RenderType.entityCutoutNoCull(TextureAtlas.LOCATION_BLOCKS));
+        }
         float thickness = 1.4f / zoom;
         if (grid) {
             CreatureModelRenderer.renderGrid(pose, vc, thickness);
@@ -126,18 +155,27 @@ public class Preview3D {
 
     /** Indice de la pieza bajo el raton o -1. */
     public int pick(CreatureDefinition def, AnimState anim, double mx, double my) {
+        Hit hit = pickHit(def, CreatureModelRenderer.pose(def, anim), mx, my);
+        return hit == null ? -1 : hit.part();
+    }
+
+    /** Lo que hay bajo el raton: pieza, cara (ver {@link PaintLayout}) y punto en coordenadas de la pieza. */
+    public record Hit(int part, int face, float x, float y, float z) {
+    }
+
+    @Nullable
+    public Hit pickHit(CreatureDefinition def, Matrix4f[] mats, double mx, double my) {
         if (!contains(mx, my) || def.parts.isEmpty()) {
-            return -1;
+            return null;
         }
         Matrix4f view = matrix();
-        Matrix4f[] mats = CreatureModelRenderer.pose(def, anim);
         Matrix4f full = new Matrix4f();
         Matrix4f inverse = new Matrix4f();
         Vector3f a = new Vector3f();
         Vector3f b = new Vector3f();
         float best = Float.MAX_VALUE;
-        int bestIndex = -1;
-        for (int i = 0; i < def.parts.size(); i++) {
+        Hit bestHit = null;
+        for (int i = 0; i < def.parts.size() && i < mats.length; i++) {
             view.mul(mats[i], full);
             full.invert(inverse);
             inverse.transformPosition((float) mx, (float) my, 20000f, a);
@@ -146,10 +184,14 @@ public class Preview3D {
             float t = rayBox(a, b, p.x, p.y, p.z, p.x + p.w, p.y + p.h, p.z + p.d);
             if (t >= 0f && t < best) {
                 best = t;
-                bestIndex = i;
+                float hx = a.x + (b.x - a.x) * t;
+                float hy = a.y + (b.y - a.y) * t;
+                float hz = a.z + (b.z - a.z) * t;
+                int face = PaintLayout.faceAt(hx, hy, hz, p.x, p.y, p.z, p.x + p.w, p.y + p.h, p.z + p.d);
+                bestHit = new Hit(i, face, hx, hy, hz);
             }
         }
-        return bestIndex;
+        return bestHit;
     }
 
     private static float rayBox(Vector3f a, Vector3f b, float x0, float y0, float z0, float x1, float y1, float z1) {

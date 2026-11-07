@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 
+import java.util.Base64;
 import java.util.Locale;
 
 /** Conversion de definiciones a JSON y viceversa (tolerante a campos que falten). */
@@ -92,6 +93,14 @@ public final class CreatureJson {
             j.addProperty("animation", p.anim.name());
             j.addProperty("animAmount", p.animAmount);
             j.addProperty("animSpeed", p.animSpeed);
+            if (p.validPaint()) {
+                JsonArray size = new JsonArray();
+                size.add(p.pw);
+                size.add(p.ph);
+                size.add(p.pd);
+                j.add("paintSize", size);
+                j.addProperty("paint", encodePaint(p.paint));
+            }
             parts.add(j);
         }
         o.add("parts", parts);
@@ -178,10 +187,58 @@ public final class CreatureJson {
                 p.anim = enumValue(j, "animation", PartAnim.class, PartAnim.NONE);
                 p.animAmount = num(j, "animAmount", 1f);
                 p.animSpeed = num(j, "animSpeed", 1f);
+                readPaint(j, p);
                 d.parts.add(p);
             }
         }
         return d;
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Pintura: RGBA en Base64
+    // ---------------------------------------------------------------------------------------
+
+    static String encodePaint(int[] argb) {
+        byte[] bytes = new byte[argb.length * 4];
+        for (int i = 0; i < argb.length; i++) {
+            int c = argb[i];
+            bytes[i * 4] = (byte) (c >> 16);
+            bytes[i * 4 + 1] = (byte) (c >> 8);
+            bytes[i * 4 + 2] = (byte) c;
+            bytes[i * 4 + 3] = (byte) (c >>> 24);
+        }
+        return Base64.getEncoder().encodeToString(bytes);
+    }
+
+    static int[] decodePaint(String text) {
+        byte[] bytes = Base64.getDecoder().decode(text);
+        int[] out = new int[bytes.length / 4];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (bytes[i * 4 + 3] & 255) << 24 | (bytes[i * 4] & 255) << 16
+                    | (bytes[i * 4 + 1] & 255) << 8 | (bytes[i * 4 + 2] & 255);
+        }
+        return out;
+    }
+
+    private static void readPaint(JsonObject j, CreaturePart p) {
+        if (!j.has("paint") || !j.has("paintSize") || !j.get("paintSize").isJsonArray()) {
+            return;
+        }
+        try {
+            JsonArray size = j.getAsJsonArray("paintSize");
+            if (size.size() != 3) {
+                return;
+            }
+            p.pw = size.get(0).getAsInt();
+            p.ph = size.get(1).getAsInt();
+            p.pd = size.get(2).getAsInt();
+            p.paint = decodePaint(j.get("paint").getAsString());
+            if (!p.validPaint()) {
+                p.clearPaint();
+            }
+        } catch (RuntimeException e) {
+            p.clearPaint();
+        }
     }
 
     // ---------------------------------------------------------------------------------------

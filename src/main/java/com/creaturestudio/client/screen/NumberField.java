@@ -10,8 +10,8 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Campo numerico enlazado a un valor. Se puede escribir o usar la rueda del raton encima
- * (Shift = paso fino, Ctrl = paso grande).
+ * Campo numerico enlazado a un valor. Se puede escribir o, con el campo activo, usar la rueda del
+ * raton o las flechas arriba/abajo (Shift = paso fino, Ctrl = paso grande).
  */
 public class NumberField extends EditBox {
     private final Supplier<Float> getter;
@@ -83,6 +83,16 @@ public class NumberField extends EditBox {
         this.setValue(format(v));
         this.moveCursorToStart(false);
         onChange.run();
+    }
+
+    /** Con el campo activo, las flechas arriba/abajo suben o bajan el valor un paso. */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (this.isFocused() && (keyCode == 265 || keyCode == 264)) {
+            nudge(keyCode == 265 ? 1 : -1);
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     /** Vuelve a leer el valor (si el usuario no esta escribiendo en este campo). */

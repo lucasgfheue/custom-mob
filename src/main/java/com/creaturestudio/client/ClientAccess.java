@@ -1,5 +1,6 @@
 package com.creaturestudio.client;
 
+import com.creaturestudio.client.render.PaintCache;
 import com.creaturestudio.client.screen.EditorScreen;
 import com.creaturestudio.client.screen.LibraryScreen;
 import net.minecraft.ChatFormatting;
@@ -20,6 +21,7 @@ public final class ClientAccess {
     }
 
     public static void onCreaturesChanged() {
+        PaintCache.prune();
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof LibraryScreen library) {
             library.refresh();

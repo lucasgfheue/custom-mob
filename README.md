@@ -1,41 +1,36 @@
 # Creature Studio — NeoForge 1.21.1
 
 Crea **tus propias criaturas dentro de Minecraft**, sin programar: modélalas con cubos (como en
-Blockbench), elige texturas y colores, anima sus partes y define cómo se comportan (como en MCreator).
+Blockbench), píntalas píxel a píxel, anima sus partes y define cómo se comportan (como en MCreator).
+También puedes partir del modelo de cualquier mob de Minecraft y modificarlo.
 
 ## Características
 
-**Modelado (pestaña «Modelo»)**
-- Vista 3D en tiempo real: arrastra para girar, clic derecho para mover la cámara, rueda para el zoom.
-- Haz clic sobre una pieza en la vista 3D para seleccionarla (se resalta en amarillo, con su pivote en rojo).
-- Hasta 128 cubos por criatura, con **jerarquía padre/hijo** (los ojos siguen a la cabeza, etc.).
-- Posición, tamaño, pivote y rotación editables a mano o con la rueda del ratón sobre el campo.
-- **Espejar X**: crea al instante la pata, el ojo o el ala del otro lado.
-- **9 plantillas**: vacía, cuadrúpedo, bípedo, araña, pájaro, slime, serpiente, gólem y dragón.
-- Más de 60 texturas: 15 propias (pelaje, escamas, plumas, manchas, ojos, bocas, colmillos…) y
-  cualquier textura de bloque de Minecraft (lana, piedra, oro, lava animada…), todas teñibles con
-  un selector de color HSV.
-- Piezas que **brillan en la oscuridad** (ojos de araña, núcleos mágicos…).
-- **15 animaciones**: cabeza que mira, piernas, brazos que golpean, patas laterales de araña, alas que
-  aletean, colas, rebote, mandíbula, giro y balanceo. Botones para probar «Caminar» y «Atacar».
-- Deshacer/rehacer (Ctrl+Z / Ctrl+Y), guardar con Ctrl+S, mover piezas con las flechas.
+El editor está ordenado en **una fila de 8 pestañas** (teclas 1 a 8). A la izquierda siempre está la
+vista 3D; a la derecha, lo de la pestaña elegida.
 
-**Comportamiento (pestaña «Comportamiento»)**
-- Vida, daño, velocidad, armadura, resistencia al empuje, rango de visión, escala y experiencia.
-- Actitud: pasiva (huye), neutral (se defiende) u hostil (persigue jugadores).
-- Camina o **vuela**.
-- Ataque cuerpo a cuerpo o a distancia: flechas, bolas de nieve, bolas de fuego o escupitajo.
-- Efecto al golpear: veneno, wither, lentitud, debilidad, fuego, levitación, ceguera o náuseas.
-- 27 conjuntos de sonidos de mobs vanilla (con botón para escucharlos).
-- Inmune al fuego, arde con el sol, se deja atraer con un ítem.
-- Botín al morir (ítem y cantidad).
-- **Aparición natural** opcional: de día, de noche o siempre, filtrando por biomas o etiquetas
-  (`minecraft:plains, #minecraft:is_forest`), con probabilidad y máximo de criaturas cercanas.
-- Colores del huevo personalizables.
+| Pestaña | Qué hay dentro |
+|---|---|
+| **Plantilla** | 9 plantillas del mod y **los modelos de todas las entidades de Minecraft** (con buscador). Pasa el ratón para verlos en 3D; con un clic se cargan con su forma, sus articulaciones y su textura original, listos para editar. |
+| **Piezas** | Árbol con todos los cubos (hasta 128). Añadir, duplicar, espejar en X, borrar, centrar; nombre y «unida a» (jerarquía). |
+| **Forma** | Posición, tamaño, pivote y giro en X/Y/Z (16 píxeles = 1 bloque). |
+| **Pintar** | Pintura píxel a píxel (pincel, borrador, gotero, grosor y color), color base con selector HSV y más de 60 texturas (propias y de bloques de Minecraft). |
+| **Animar** | 15 movimientos: cabeza, piernas, brazos, patas de araña, alas, cola, rebote, mandíbula, giro y balanceo. |
+| **Atributos** | Vida, daño, velocidad, armadura, empuje, visión, escala y experiencia. |
+| **Conducta** | Pasiva, neutral u hostil; camina o vuela; cuerpo a cuerpo, flechas, bolas de nieve, fuego o escupitajo; efecto al golpear; 27 sonidos; fuego, sol e ítem que la atrae. |
+| **Aparición** | Aparición natural (horario, biomas, probabilidad), botín al morir y colores del huevo. |
+
+**Botón «Ratón: Sí/No»** (en la vista 3D, tecla **M**): con él activado editas directamente sobre el modelo.
+- **Mover** (G): arrastra la pieza, o una de sus flechas X/Y/Z para moverla en un solo eje.
+- **Tamaño** (T): tira de los cuadraditos de las caras para agrandar o achicar la pieza.
+- **Pincel** (B), **Borrador** (E) y **Gotero** (I): pinta píxel a píxel sobre cualquier pieza, con grosor
+  de 1 a 8 (teclas - y +). La pintura se ve encima del color y la textura de la pieza.
+- Mantén **Shift** para moverte de 0,25 en 0,25. Clic en el fondo: girar la vista. Clic derecho: desplazarla.
 
 **Además**
+- Deshacer/rehacer (Ctrl+Z / Ctrl+Y), guardar (Ctrl+S), duplicar (Ctrl+D), mover con las flechas.
 - Huevos de criatura con el nombre y los colores de cada criatura.
-- Exportar/importar criaturas como `.json` para compartirlas con amigos.
+- Exportar/importar criaturas como `.json` para compartirlas con amigos (incluyen la pintura).
 - Funciona en un jugador y en servidores (el mod debe estar instalado en el servidor y en los clientes).
 
 ## Cómo compilarlo con GitHub (sin instalar nada)
@@ -73,8 +68,12 @@ El `.jar` queda en `build/libs/`.
   Tablón   Tablón  Tablón
   ```
 
-- **Nueva** abre el editor con el selector de plantillas.
-- En la lista de la izquierda eliges la pieza; a la derecha editas su **Forma**, **Aspecto** y **Animación**.
+- En la biblioteca: a la izquierda **Mis criaturas** con **+ Nueva criatura**, **Importar** y **Abrir carpeta**;
+  a la derecha la criatura elegida con **Editar / Duplicar / Eliminar** y **Obtener huevo / Invocar / Exportar**.
+- **+ Nueva criatura** abre el editor en la pestaña **Plantilla**: elige una plantilla o un modelo de Minecraft.
+- Elige la pieza en **Piezas**, haciendo clic sobre ella en la vista 3D o con el selector «Pieza» que hay arriba
+  de **Forma**, **Pintar** y **Animar**.
+- Para pintar: pestaña **Pintar** → **Usar el ratón** (o tecla M y luego B) y pinta sobre el modelo.
 - Coordenadas en píxeles: 16 = 1 bloque. El suelo está en Y = 0 y el frente de la criatura mira hacia **-Z**
   (la flecha azul de la rejilla). «Centrar modelo» la centra y la apoya en el suelo.
 - **Guardar** la sube al mundo. Después, en la biblioteca:
@@ -107,5 +106,7 @@ src/main/resources/        Texturas, modelos, idiomas (es/en), receta y botín
 - **No veo la criatura**: comprueba que el mod está instalado también en el servidor.
 - **Una textura sale morada y negra**: el identificador no existe; elige una de la lista o revisa el nombre
   (por ejemplo `minecraft:block/stone`).
+- **Un modelo de Minecraft sale gris**: el mod no encontró su textura (algunos mobs la guardan con otro nombre);
+  la forma se carga igual y puedes pintarla.
 
 Licencia MIT.
