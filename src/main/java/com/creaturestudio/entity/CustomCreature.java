@@ -442,12 +442,6 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     }
 
     @Override
-    public boolean canBreatheUnderwater() {
-        CreatureDefinition d = def();
-        return (d != null && !d.canDrown) || super.canBreatheUnderwater();
-    }
-
-    @Override
     public boolean causeFallDamage(float fallDistance, float multiplier, DamageSource source) {
         CreatureDefinition d = def();
         if (isFlyer() || (d != null && d.noFallDamage)) {
@@ -516,6 +510,10 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
             if (d != null) {
                 if (d.burnsInSun && !d.fireImmune && this.isSunBurnTick()) {
                     this.igniteForSeconds(8.0f);
+                }
+                if (!d.canDrown && this.getAirSupply() < this.getMaxAirSupply()) {
+                    // "No se ahoga": en 1.21 canBreatheUnderwater() es final, asi que se le rellena el aire cada tick
+                    this.setAirSupply(this.getMaxAirSupply());
                 }
                 regenerate(d);
                 updateShield(d);
