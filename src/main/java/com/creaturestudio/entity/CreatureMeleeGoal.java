@@ -1,5 +1,6 @@
 package com.creaturestudio.entity;
 
+import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.CreatureDefinition;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
@@ -38,6 +39,7 @@ public class CreatureMeleeGoal extends MeleeAttackGoal {
         CreatureDefinition d = this.creature.def();
         this.cooldown = d == null ? 20 : d.meleeInterval;
         this.creature.lowerShield(12);
+        this.creature.playAction(AnimAction.ATTACK);
         this.mob.swing(InteractionHand.MAIN_HAND);
         this.mob.doHurtTarget(target);
     }

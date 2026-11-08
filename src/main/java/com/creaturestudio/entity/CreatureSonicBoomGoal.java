@@ -1,5 +1,6 @@
 package com.creaturestudio.entity;
 
+import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.CreatureDefinition;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
@@ -47,6 +48,7 @@ class CreatureSonicBoomGoal extends Goal {
         this.fired = false;
         mob.getNavigation().stop();
         mob.playSoundId("entity.warden.sonic_charge", 3.0f, 1.0f);
+        mob.playAction(AnimAction.ABILITY);
     }
 
     @Override

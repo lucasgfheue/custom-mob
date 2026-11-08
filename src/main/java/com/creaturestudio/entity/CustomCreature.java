@@ -1,5 +1,6 @@
 package com.creaturestudio.entity;
 
+import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.Ballistics;
 import com.creaturestudio.data.Behavior;
 import com.creaturestudio.data.CreatureDefinition;
@@ -123,6 +124,13 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     int sonicCooldown;
     int chargeCooldown;
     private int milkTimer;
+
+    /** Animaciones propias (cliente): tick en que empezo cada accion de una vez (atacar, disparar...). */
+    private final int[] actionStart = newActionStarts();
+    private static final int NEVER = Integer.MIN_VALUE;
+    private int lastHurtTime;
+    /** Eventos de entidad que mandan las acciones al cliente (EVENT_BASE + orden de la accion). */
+    private static final byte EVENT_BASE = 100;
 
     // Para que las condiciones de los objetivos de IA no pregunten la definicion a cada momento
     private boolean appliedClimb;
@@ -493,6 +501,7 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         if (sound != null) {
             this.playSound(sound, 1.0f, 1.0f / (this.getRandom().nextFloat() * 0.4f + 0.8f));
         }
+        playAction(AnimAction.SHOOT);
         this.swing(InteractionHand.MAIN_HAND);
     }
 
@@ -601,6 +610,10 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         CreatureDefinition d = def();
         if (this.level().isClientSide()) {
             this.clientBeamTime = getBeamTarget() != 0 ? this.clientBeamTime + 1 : 0;
+            if (this.hurtTime > this.lastHurtTime) {
+                this.actionStart[AnimAction.HURT.ordinal()] = this.tickCount;
+            }
+            this.lastHurtTime = this.hurtTime;
         } else {
             if (this.explodeCooldown > 0) {
                 this.explodeCooldown--;
@@ -877,6 +890,49 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     /** Ticks que lleva el rayo encendido (en el cliente, para animar la textura). */
     public float getBeamTime(float partialTick) {
         return this.clientBeamTime + partialTick;
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Animaciones propias
+    // ---------------------------------------------------------------------------------------
+
+    /** Servidor: avisa a los clientes de que empieza una accion (si la criatura tiene animacion para ella). */
+    void playAction(AnimAction a) {
+        CreatureDefinition d = def();
+        if (d != null && d.customAnims.has(a) && !this.level().isClientSide()) {
+            this.level().broadcastEntityEvent(this, (byte) (EVENT_BASE + a.ordinal()));
+        }
+    }
+
+    @Override
+    public void handleEntityEvent(byte id) {
+        int a = id - EVENT_BASE;
+        if (a >= 0 && a < AnimAction.COUNT) {
+            this.actionStart[a] = this.tickCount;
+            return;
+        }
+        super.handleEntityEvent(id);
+    }
+
+    /**
+     * Cliente: ticks desde que empezo cada accion de una vez (para {@code AnimPlayer}); morir va con el tiempo
+     * que lleva muerta. ageInTicks = tickCount + fraccion del tick.
+     */
+    public float[] actionAges(float ageInTicks) {
+        float[] ages = new float[AnimAction.COUNT];
+        float partial = ageInTicks - this.tickCount;
+        for (int i = 0; i < ages.length; i++) {
+            int start = this.actionStart[i];
+            ages[i] = start == NEVER ? -1f : (this.tickCount - start) + partial;
+        }
+        ages[AnimAction.DEATH.ordinal()] = this.deathTime > 0 ? this.deathTime - 1 + partial : -1f;
+        return ages;
+    }
+
+    private static int[] newActionStarts() {
+        int[] a = new int[AnimAction.COUNT];
+        java.util.Arrays.fill(a, NEVER);
+        return a;
     }
 
     boolean isSummoned() {

@@ -1,5 +1,6 @@
 package com.creaturestudio.client.render;
 
+import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.entity.CustomCreature;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -39,6 +40,16 @@ public class CustomCreatureRenderer extends MobRenderer<CustomCreature, Creature
     @Override
     public ResourceLocation getTextureLocation(CustomCreature entity) {
         return TextureAtlas.LOCATION_BLOCKS;
+    }
+
+    /** Con una animacion propia de morir, el cuerpo no se tumba de lado como en Minecraft: hace la animacion. */
+    @Override
+    protected float getFlipDegrees(CustomCreature entity) {
+        CreatureDefinition d = entity.def();
+        if (d != null && d.customAnims.has(AnimAction.DEATH)) {
+            return 0f;
+        }
+        return super.getFlipDegrees(entity);
     }
 
     @Override

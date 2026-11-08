@@ -9,6 +9,9 @@ import com.creaturestudio.client.render.CreatureModelRenderer;
 import com.creaturestudio.client.render.PaintAtlas;
 import com.creaturestudio.client.render.Materials;
 import com.creaturestudio.data.Abilities;
+import com.creaturestudio.data.AnimAction;
+import com.creaturestudio.data.AnimPlayer;
+import com.creaturestudio.data.CustomAnims;
 import com.creaturestudio.data.Behavior;
 import com.creaturestudio.data.CreatureDrop;
 import com.creaturestudio.data.DoorMode;
@@ -151,7 +154,9 @@ public class EditorScreen extends Screen {
         RESIZE("resize"),
         BRUSH("brush"),
         ERASER("eraser"),
-        PICKER("picker");
+        PICKER("picker"),
+        /** Animaciones propias: arrastrar una pieza la gira en la pose elegida. */
+        POSE("pose");
 
         private final String key;
 
@@ -234,6 +239,27 @@ public class EditorScreen extends Screen {
     private boolean animate = true;
     private boolean walk;
     private long attackStart = -100000L;
+    /** Pestana Animar: true = "Mis animaciones" (poses) en vez de las automaticas. */
+    private boolean customAnimMode;
+    private AnimAction animAction = AnimAction.WALK;
+    private int animPose;
+    /** Mis animaciones: ver la animacion moviendose (si no, se ve la pose elegida quieta). */
+    private boolean animPlay;
+    private long animPlayStart;
+    /** Herramienta Posar: arrastrando una pieza (gira alrededor de su pivote, en el plano de la pantalla). */
+    private boolean posing;
+    private boolean poseChanged;
+    private double poseCx;
+    private double poseCy;
+    private double poseLastAngle;
+    private double poseTurned;
+    private float poseSign = 1f;
+    @Nullable
+    private float[] poseStart;
+    @Nullable
+    private float[] poseParentRot;
+    @Nullable
+    private float[] poseAxis;
 
     private final Preview3D preview = new Preview3D();
     private final Preview3D templatePreview = new Preview3D();
@@ -574,8 +600,30 @@ public class EditorScreen extends Screen {
 
     private void setTool(Tool t) {
         endMouseAction();
+        if (t == Tool.POSE) {
+            customAnimMode = true;
+            if (tab != Tab.ANIMATE) {
+                setPanelCollapsed(false);
+                switchTab(Tab.ANIMATE);
+            }
+        }
         tool = t;
         mouseMode = true;
+        requestRebuild();
+    }
+
+    /** Pestana Animar: automaticas o mis animaciones (con el raton, la herramienta va con el modo). */
+    private void setCustomAnimMode(boolean on) {
+        endMouseAction();
+        customAnimMode = on;
+        animPlay = false;
+        if (mouseMode) {
+            if (on && tool != Tool.POSE) {
+                tool = Tool.POSE;
+            } else if (!on && tool == Tool.POSE) {
+                tool = Tool.MOVE;
+            }
+        }
         requestRebuild();
     }
 
@@ -1197,7 +1245,17 @@ public class EditorScreen extends Screen {
         if (p == null) {
             return noParts(y);
         }
+        y = smallLabel(y, Ui.tr("animate.mode"));
+        y = chips(y, NO_YES, 2, () -> customAnimMode, this::setCustomAnimMode,
+                v -> Ui.tr(v ? "animate.mode.custom" : "animate.mode.auto"),
+                v -> Ui.tr(v ? "animate.mode.custom_tip" : "animate.mode.auto_tip")) + 6;
+        if (customAnimMode) {
+            return buildCustomAnim(y, p);
+        }
         y = pieceSelector(y);
+        if (movesInAny(p)) {
+            y = text(y, Ui.tr("animate.custom_wins"), Ui.ACCENT) + 4;
+        }
         y = section(y, Ui.tr("animate.type"));
         y = chips(y, PartAnim.values(), 2, () -> p.anim, v -> {
             p.anim = v;
@@ -1217,6 +1275,290 @@ public class EditorScreen extends Screen {
         button(0, y, half, Ui.tr("editor.preview.attack"), b -> attackStart = Util.getMillis(), null);
         y += ROW + 6;
         return text(y, Ui.tr("editor.hint.anim"), HINT);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Mis animaciones (poses)
+    // ---------------------------------------------------------------------------------------
+
+    private static final String[] AXES = {"X", "Y", "Z"};
+    private static final int[] AXIS_TEXT = {0xFFFF9A9A, 0xFF9AFF9A, 0xFF9AC4FF};
+
+    private boolean posingView() {
+        return tab == Tab.ANIMATE && customAnimMode;
+    }
+
+    private boolean movesInAny(CreaturePart p) {
+        for (AnimAction a : AnimAction.ALL) {
+            if (p.movesIn(a, def.customAnims.poses(a))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private MutableComponent actionName(AnimAction a) {
+        return Ui.tr("custom.action." + a.key());
+    }
+
+    private int buildCustomAnim(int y, CreaturePart p) {
+        AnimAction a = animAction;
+        y = section(y, Ui.tr("custom.action"));
+        y = chips(y, AnimAction.ALL, 2, () -> animAction, v -> {
+            animAction = v;
+            animPose = 0;
+            animPlay = false;
+            requestRebuild();
+        }, v -> def.customAnims.has(v) ? actionName(v).append(" \u2022") : actionName(v),
+                v -> Ui.tr("custom.action." + v.key() + ".tip")) + 4;
+        y = text(y, Ui.tr("custom.action." + a.key() + ".tip"), Ui.ACCENT) + 6;
+        if (!def.customAnims.has(a)) {
+            y = text(y, Ui.tr("custom.none"), Ui.TEXT) + 4;
+            button(0, y, contentW, Ui.tr("custom.create", actionName(a)), b -> {
+                CustomAnims.create(def, a);
+                animPose = 0;
+                animPlay = false;
+                markChanged();
+                requestRebuild();
+            }, Ui.tr("custom.create_tip"));
+            y += ROW + 6;
+            return text(y, Ui.tr("custom.how"), HINT);
+        }
+        int n = def.customAnims.poses(a);
+        animPose = Mth.clamp(animPose, 0, n - 1);
+
+        // Poses
+        y = section(y, () -> Ui.tr("custom.poses", animPose + 1, def.customAnims.poses(animAction)));
+        Integer[] poses = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            poses[i] = i;
+        }
+        y = chips(y, poses, CustomAnims.MAX_POSES, () -> animPose, v -> {
+            animPose = v;
+            animPlay = false;
+        }, v -> Component.literal(String.valueOf(v + 1)), v -> Ui.tr("custom.pose_tip", v + 1)) + 4;
+        int third = (contentW - GAP * 2) / 3;
+        button(0, y, third, Ui.tr("custom.add_pose"), b -> {
+            int at = CustomAnims.insertPose(def, a, animPose, true);
+            if (at < 0) {
+                warn(Ui.tr("custom.too_many", CustomAnims.MAX_POSES));
+                return;
+            }
+            animPose = at;
+            animPlay = false;
+            markChanged();
+            requestRebuild();
+        }, Ui.tr("custom.add_pose_tip"));
+        button(third + GAP, y, third, Ui.tr("custom.opposite"), b -> {
+            int at = CustomAnims.addOpposite(def, a, animPose);
+            if (at < 0) {
+                warn(Ui.tr("custom.too_many", CustomAnims.MAX_POSES));
+                return;
+            }
+            animPose = at;
+            animPlay = false;
+            markChanged();
+            requestRebuild();
+        }, Ui.tr("custom.opposite_tip"));
+        button((third + GAP) * 2, y, contentW - (third + GAP) * 2, Ui.tr("custom.remove_pose"), b -> {
+            CustomAnims.removePose(def, a, animPose);
+            animPose = Math.max(0, Math.min(animPose, def.customAnims.poses(a) - 1));
+            animPlay = false;
+            markChanged();
+            requestRebuild();
+        }, Ui.tr("custom.remove_pose_tip"));
+        y += ROW + 6;
+
+        // La pieza en esta pose
+        y = section(y, Ui.tr("custom.piece"));
+        y = pieceSelector(y);
+        if (!mouseMode || tool != Tool.POSE) {
+            y = text(y, Ui.tr("custom.mouse_off"), Ui.ACCENT) + 4;
+            button(0, y, Math.min(contentW, 170), Ui.tr("custom.mouse_on"), b -> setTool(Tool.POSE), null);
+            y += ROW + 4;
+        } else {
+            y = text(y, Ui.tr("tool.pose.help"), HINT) + 4;
+        }
+        int lw = 12;
+        y = smallLabel(y, Ui.tr("custom.turn"));
+        for (int k = 0; k < 3; k++) {
+            int c = k;
+            y = sliderRow(y, lw, Component.literal(AXES[k]), AXIS_TEXT[k], () -> p.move(animAction, animPose, c),
+                    v -> p.setMove(animAction, animPose, c, v), -180f, 180f, CustomAnims.MAX_ANGLE, 1f, 15f,
+                    Ui.tr("custom.turn_tip"));
+        }
+        y = smallLabel(y, Ui.tr("custom.move"));
+        for (int k = 0; k < 3; k++) {
+            int c = 3 + k;
+            y = sliderRow(y, lw, Component.literal(AXES[k]), AXIS_TEXT[k], () -> p.move(animAction, animPose, c),
+                    v -> p.setMove(animAction, animPose, c, v), -16f, 16f, CustomAnims.MAX_OFFSET, 0.25f, 1f,
+                    Ui.tr("custom.move_tip"));
+        }
+        button(0, y, contentW, Ui.tr("custom.reset_piece"), b -> {
+            p.clearMove(animAction, animPose);
+            markChanged();
+        }, Ui.tr("custom.reset_piece_tip"));
+        y += ROW + 6;
+
+        // Probar y ajustes
+        y = section(y, Ui.tr("custom.test"));
+        add(new Toggle(0, y, contentW, Ui.tr("custom.play"), () -> animPlay, v -> {
+            animPlay = v;
+            animPlayStart = Util.getMillis();
+        }, Ui.tr("custom.play_tip"), false));
+        y += CHIP_H + 4;
+        int sw = Math.max(lw, font.width(Ui.tr("custom.speed")) + 6);
+        y = sliderRow(y, sw, Ui.tr("custom.speed"), Ui.MUTED, () -> def.customAnims.speed(animAction),
+                v -> def.customAnims.speed[animAction.ordinal()] = v, 0.25f, 4f, 0f, 0.05f, 0.25f,
+                Ui.tr("custom.speed_tip"));
+        add(new TextLine(0, y, () -> durationText(animAction), HINT));
+        y += 14;
+        button(0, y, contentW, Ui.tr("custom.delete", actionName(a)), b -> {
+            CustomAnims.clear(def, a);
+            animPose = 0;
+            animPlay = false;
+            markChanged();
+            requestRebuild();
+        }, Ui.tr("custom.delete_tip"));
+        y += ROW + 6;
+        return text(y, Ui.tr("custom.hint"), HINT);
+    }
+
+    private Component durationText(AnimAction a) {
+        if (a == AnimAction.WALK) {
+            return Ui.tr("custom.walk_time");
+        }
+        float s = a.seconds() / Math.max(CustomAnims.MIN_SPEED, def.customAnims.speed(a));
+        if (a == AnimAction.DEATH) {
+            s = Math.min(s, 1f);
+        }
+        return Ui.tr(a.loop() ? "custom.loop_time" : "custom.once_time", Ui.fmt(Math.round(s * 100f) / 100f));
+    }
+
+    /**
+     * Barra para arrastrar un valor y su numero al lado (se puede escribir). fieldLimit: hasta donde se puede escribir
+     * (0 = lo mismo que la barra; si no, de -fieldLimit a fieldLimit).
+     */
+    private int sliderRow(int y, int lw, Component label, int color, Supplier<Float> getter, Consumer<Float> setter,
+                          float min, float max, float fieldLimit, float step, float bigStep, @Nullable Component tip) {
+        int fieldW = 44;
+        add(new ValueSlider(0, y + 1, contentW - fieldW - GAP, lw, label, color, getter, setter, min, max, step,
+                bigStep, tip));
+        float lo = fieldLimit > 0f ? -fieldLimit : min;
+        float hi = fieldLimit > 0f ? fieldLimit : max;
+        number(contentW - fieldW, y, fieldW, getter, setter, lo, hi, step, false);
+        return y + ROW;
+    }
+
+    /** Lo que se ve en la vista 3D mientras se edita la criatura. */
+    private AnimState editorAnim() {
+        if (posingView()) {
+            return animPlay && def.customAnims.has(animAction) ? playAnim() : pinnedAnim();
+        }
+        return mouseMode ? AnimState.REST : currentAnim(def);
+    }
+
+    /** La postura normal mas la pose que se esta editando. */
+    private AnimState pinnedAnim() {
+        int n = def.customAnims.poses(animAction);
+        return AnimState.pinned(animAction.ordinal(), Mth.clamp(animPose, 0, Math.max(0, n - 1)));
+    }
+
+    /** Mis animaciones: la accion elegida como se veria en el juego (las de una vez se repiten). */
+    private AnimState playAnim() {
+        float t = (Util.getMillis() - animPlayStart) / 50f;
+        AnimAction a = animAction;
+        float limb = 0f;
+        float amount = 0f;
+        boolean flying = false;
+        float attack = 0f;
+        float[] ages = null;
+        switch (a) {
+            case WALK -> {
+                limb = t * 0.6f;
+                amount = 1f;
+            }
+            case FLY -> flying = true;
+            case IDLE -> {
+            }
+            default -> {
+                float dur = AnimPlayer.durationTicks(def.customAnims, a);
+                float age = t % (dur + (a == AnimAction.DEATH ? 20f : 12f));
+                ages = new float[AnimAction.COUNT];
+                java.util.Arrays.fill(ages, -1f);
+                ages[a.ordinal()] = age;
+                if ((a == AnimAction.ATTACK || a == AnimAction.SHOOT) && age < 6f) {
+                    attack = age / 6f; // el golpe de las animaciones automaticas (brazos)
+                }
+            }
+        }
+        return new AnimState(limb, amount, t, 0f, 0f, attack, flying, ages, -1, -1);
+    }
+
+    /** Herramienta Posar: empieza a girar la pieza elegida alrededor de su pivote. */
+    private void beginPose(double mx, double my, Matrix4f view, Matrix4f[] mats) {
+        CreaturePart p = sel();
+        if (p == null || selected >= mats.length || !def.customAnims.has(animAction)) {
+            return;
+        }
+        float[] c = Preview3D.project(view, mats[selected], p.px, p.py, p.pz);
+        // La pieza gira en el plano de la pantalla: alrededor del eje que sale de ella.
+        float[] axis = Preview3D.viewAxis(view);
+        if (axis == null) {
+            return;
+        }
+        poseAxis = axis;
+        poseSign = Preview3D.turnSign(view, axis);
+        poseCx = c[0];
+        poseCy = c[1];
+        int pose = Mth.clamp(animPose, 0, def.customAnims.poses(animAction) - 1);
+        animPose = pose;
+        poseStart = new float[]{p.move(animAction, pose, 0), p.move(animAction, pose, 1), p.move(animAction, pose, 2)};
+        poseParentRot = Preview3D.rotationOf(parentMatrix(mats, selected));
+        double dx = mx - poseCx;
+        double dy = my - poseCy;
+        poseLastAngle = dx * dx + dy * dy < 16 ? Double.NaN : Math.atan2(dy, dx);
+        poseTurned = 0;
+        posing = true;
+        poseChanged = false;
+    }
+
+    private void updatePose(double mx, double my) {
+        CreaturePart p = sel();
+        if (p == null || poseStart == null || poseAxis == null || poseParentRot == null) {
+            return;
+        }
+        double dx = mx - poseCx;
+        double dy = my - poseCy;
+        if (dx * dx + dy * dy < 16) {
+            return; // muy cerca del pivote: el angulo no es fiable
+        }
+        double ang = Math.atan2(dy, dx);
+        if (Double.isNaN(poseLastAngle)) {
+            poseLastAngle = ang;
+            return;
+        }
+        double d = ang - poseLastAngle;
+        while (d > Math.PI) {
+            d -= Math.PI * 2;
+        }
+        while (d < -Math.PI) {
+            d += Math.PI * 2;
+        }
+        poseTurned += d;
+        poseLastAngle = ang;
+        float angle = (float) poseTurned * poseSign;
+        if (hasShiftDown()) {
+            float snap = (float) Math.toRadians(15);
+            angle = Math.round(angle / snap) * snap;
+        }
+        float[] delta = PoseSolver.rotateDelta(p, poseStart, poseParentRot, poseAxis[0], poseAxis[1], poseAxis[2],
+                angle);
+        for (int k = 0; k < 3; k++) {
+            p.setMove(animAction, animPose, k, delta[k]);
+        }
+        poseChanged = true;
+        refreshFields();
     }
 
     private int buildStatsTab(int y) {
@@ -2355,6 +2697,13 @@ public class EditorScreen extends Screen {
         if (newTab == tab) {
             return;
         }
+        endMouseAction();
+        if (tool == Tool.POSE && newTab != Tab.ANIMATE) {
+            tool = Tool.MOVE;
+        } else if (newTab == Tab.ANIMATE && customAnimMode && mouseMode && !tool.paints()) {
+            tool = Tool.POSE;
+        }
+        animPlay = false;
         tab = newTab;
         dropdown = null;
         activeElement = null;
@@ -3002,7 +3351,7 @@ public class EditorScreen extends Screen {
             templatePreview.yaw = 0.6f + (Util.getMillis() % 62832L) * 0.0006f;
             paint = showVanilla ? previewPaintFor(shown) : null;
         }
-        AnimState anim = editing && mouseMode ? AnimState.REST : currentAnim(shown);
+        AnimState anim = editing ? editorAnim() : currentAnim(shown);
         if (editing) {
             updateVoxelCursor(mouseX, mouseY);
         } else {
@@ -3044,7 +3393,7 @@ public class EditorScreen extends Screen {
         renderPreviewOverlay(g);
         if (resizingPanel) {
             g.fill(resizeX - 1, HEADER_H, resizeX + 1, height, Ui.ACCENT);
-        } else if (dividerHit(mx, my) && !dragging && gizmoHandle < 0 && !painting) {
+        } else if (dividerHit(mx, my) && !dragging && gizmoHandle < 0 && !painting && !posing) {
             g.fill(panelX - 1, HEADER_H, panelX + 1, height, 0xFF8A93A6);
         }
 
@@ -3054,7 +3403,7 @@ public class EditorScreen extends Screen {
             dropdown.render(g, mouseX, mouseY);
             g.pose().popPose();
         } else if (activeElement == null && !dragging && !draggingScrollbar && !resizingPanel
-                && gizmoHandle < 0 && !painting) {
+                && gizmoHandle < 0 && !painting && !posing) {
             renderTabTooltip(g, mx, my);
             renderElementTooltip(g, mx, my);
             renderViewChipTooltip(g, mx, my);
@@ -3494,6 +3843,10 @@ public class EditorScreen extends Screen {
             updateGizmo(mouseX, mouseY);
             return true;
         }
+        if (posing) {
+            updatePose(mouseX, mouseY);
+            return true;
+        }
         if (painting) {
             strokeTo(mouseX, mouseY);
             return true;
@@ -3530,14 +3883,14 @@ public class EditorScreen extends Screen {
             activeElement = null;
             return true;
         }
-        if ((gizmoHandle >= 0 || painting) && button == 0) {
+        if ((gizmoHandle >= 0 || painting || posing) && button == 0) {
             endMouseAction();
             return true;
         }
         if (dragging && button == dragButton) {
             dragging = false;
             if (!moved && button == 0 && tab.usesPart()) {
-                int hit = preview.pick(def, currentAnim(def), mouseX, mouseY);
+                int hit = preview.pick(def, editorAnim(), mouseX, mouseY);
                 if (hit >= 0) {
                     select(hit);
                 }
@@ -3653,6 +4006,10 @@ public class EditorScreen extends Screen {
                     setTool(Tool.PICKER);
                     return true;
                 }
+                case GLFW.GLFW_KEY_P -> {
+                    setTool(Tool.POSE);
+                    return true;
+                }
                 case GLFW.GLFW_KEY_LEFT_BRACKET, GLFW.GLFW_KEY_KP_SUBTRACT, GLFW.GLFW_KEY_MINUS -> {
                     changeBrush(-1);
                     return true;
@@ -3754,7 +4111,7 @@ public class EditorScreen extends Screen {
     // =======================================================================================
 
     private Matrix4f[] restMats() {
-        return CreatureModelRenderer.pose(def, AnimState.REST);
+        return CreatureModelRenderer.pose(def, posingView() ? pinnedAnim() : AnimState.REST);
     }
 
     private static float[] boxCenter(CreaturePart p) {
@@ -3884,6 +4241,20 @@ public class EditorScreen extends Screen {
             }
             case PICKER -> {
                 return voxelMode && tab == Tab.PAINT ? pickVoxelColor(mx, my, mats) : pickColor(mx, my, mats);
+            }
+            case POSE -> {
+                Preview3D.Hit hit = preview.pickHit(def, mats, mx, my);
+                if (hit == null) {
+                    return false;
+                }
+                if (hit.part() != selected) {
+                    select(hit.part());
+                }
+                if (posingView()) {
+                    animPlay = false;
+                    beginPose(mx, my, view, mats);
+                }
+                return true;
             }
             default -> {
                 boolean voxels = voxelMode && tab == Tab.PAINT;
@@ -4024,7 +4395,9 @@ public class EditorScreen extends Screen {
 
     /** Termina el arrastre o el trazo actual (un solo paso para deshacer). */
     private void endMouseAction() {
-        boolean changed = gizmoHandle >= 0 || (painting && strokeChanged);
+        boolean changed = gizmoHandle >= 0 || (painting && strokeChanged) || (posing && poseChanged);
+        posing = false;
+        poseChanged = false;
         gizmoHandle = -1;
         gizmoStart = null;
         painting = false;
@@ -4170,6 +4543,13 @@ public class EditorScreen extends Screen {
                     square(g, h[0], h[1], hover == 10 + f ? 4 : 3, color);
                 }
             }
+        } else if (tool == Tool.POSE && posingView() && !animPlay && p != null && selected < mats.length
+                && def.customAnims.has(animAction)) {
+            float[] c = Preview3D.project(view, mats[selected], p.px, p.py, p.pz);
+            if (posing) {
+                line(g, c[0], c[1], mx, my, 1, 0xC0FFD84A);
+            }
+            square(g, c[0], c[1], posing ? 4 : 3, 0xFFFFD84A);
         } else if ((tool == Tool.BRUSH || tool == Tool.ERASER) && !(voxelMode && tab == Tab.PAINT)
                 && preview.contains(mx, my) && !dragging) {
             Preview3D.Hit hit = preview.pickHit(def, mats, mx, my);
@@ -4638,6 +5018,114 @@ public class EditorScreen extends Screen {
         @Nullable
         List<FormattedCharSequence> tooltip(double mx, double my) {
             return font.split(tip, 220);
+        }
+    }
+
+    /** Barra que se arrastra para cambiar un valor (Mayus: saltos grandes). */
+    private final class ValueSlider extends Element {
+        private final int labelW;
+        private final Component label;
+        private final int color;
+        private final Supplier<Float> getter;
+        private final Consumer<Float> setter;
+        private final float min;
+        private final float max;
+        private final float step;
+        private final float bigStep;
+        @Nullable
+        private final Component tip;
+        private boolean held;
+        private boolean changed;
+
+        ValueSlider(int x, int y, int w, int labelW, Component label, int color, Supplier<Float> getter,
+                    Consumer<Float> setter, float min, float max, float step, float bigStep, @Nullable Component tip) {
+            super(x, y, w, CHIP_H);
+            this.labelW = labelW;
+            this.label = label;
+            this.color = color;
+            this.getter = getter;
+            this.setter = setter;
+            this.min = min;
+            this.max = max;
+            this.step = step;
+            this.bigStep = bigStep;
+            this.tip = tip;
+        }
+
+        private int trackL() {
+            return left() + labelW;
+        }
+
+        private int trackW() {
+            return Math.max(10, w - labelW - 3);
+        }
+
+        private int xOf(float v) {
+            return trackL() + Math.round((Mth.clamp(v, min, max) - min) / (max - min) * (trackW() - 1));
+        }
+
+        @Override
+        void render(GuiGraphics g, int mx, int my) {
+            int l = left();
+            int t = top();
+            int tl = trackL();
+            int tw = trackW();
+            boolean hover = held || hit(mx, my);
+            g.drawString(font, label, l, t + 3, color, false);
+            int cy = t + h / 2;
+            g.fill(tl, cy - 1, tl + tw, cy + 1, hover ? 0xFF8A93A6 : 0xFF4A505C);
+            if (min < 0f && max > 0f) {
+                int zx = xOf(0f);
+                g.fill(zx, cy - 3, zx + 1, cy + 4, 0xFF8A93A6);
+                int kx = xOf(getter.get());
+                g.fill(Math.min(zx, kx), cy - 1, Math.max(zx, kx) + 1, cy + 1, color);
+            }
+            int kx = xOf(getter.get());
+            g.fill(kx - 2, t + 2, kx + 3, t + h - 2, 0xFF101216);
+            g.fill(kx - 1, t + 3, kx + 2, t + h - 3, held ? Ui.ACCENT : (hover ? 0xFFFFFFFF : 0xFFD0D4DC));
+        }
+
+        @Override
+        boolean click(double mx, double my, int button) {
+            if (mx < trackL() - 4) {
+                return false;
+            }
+            held = true;
+            changed = false;
+            drag(mx, my);
+            return true;
+        }
+
+        @Override
+        void drag(double mx, double my) {
+            if (!held) {
+                return;
+            }
+            float f = (float) ((mx - trackL()) / Math.max(1, trackW() - 1));
+            float v = min + Mth.clamp(f, 0f, 1f) * (max - min);
+            float st = hasShiftDown() ? bigStep : step;
+            v = Mth.clamp(Math.round(v / st) * st, min, max);
+            v = Math.round(v * 1000f) / 1000f; // lo mismo que se ve en el numero
+            if (v != getter.get()) {
+                setter.accept(v);
+                changed = true;
+                refreshFields();
+            }
+        }
+
+        @Override
+        void release() {
+            held = false;
+            if (changed) {
+                markChanged();
+            }
+            changed = false;
+        }
+
+        @Override
+        @Nullable
+        List<FormattedCharSequence> tooltip(double mx, double my) {
+            return tip == null ? null : tip(tip);
         }
     }
 

@@ -58,6 +58,82 @@ public class CreaturePart {
      */
     public int[] voxels;
 
+    /**
+     * Poses de las animaciones propias (ver {@link CustomAnims}): moves[accion] tiene {@link CustomAnims#VALUES}
+     * numeros por pose (giro x, y, z en grados y desplazamiento x, y, z en pixeles, sumados a la postura normal),
+     * o es null si la pieza no se mueve en esa accion. Puede ser null.
+     */
+    public float[][] moves;
+
+    /** Un valor de una pose (0 si no tiene). */
+    public float move(AnimAction a, int pose, int k) {
+        if (moves == null || pose < 0 || pose >= CustomAnims.MAX_POSES || k < 0 || k >= CustomAnims.VALUES) {
+            return 0f;
+        }
+        float[] v = moves[a.ordinal()];
+        return v == null ? 0f : v[pose * CustomAnims.VALUES + k];
+    }
+
+    public void setMove(AnimAction a, int pose, int k, float value) {
+        if (pose < 0 || pose >= CustomAnims.MAX_POSES || k < 0 || k >= CustomAnims.VALUES) {
+            return;
+        }
+        if (moves == null) {
+            if (value == 0f) {
+                return;
+            }
+            moves = new float[AnimAction.COUNT][];
+        }
+        float[] v = moves[a.ordinal()];
+        if (v == null) {
+            if (value == 0f) {
+                return;
+            }
+            v = new float[CustomAnims.MAX_POSES * CustomAnims.VALUES];
+            moves[a.ordinal()] = v;
+        }
+        v[pose * CustomAnims.VALUES + k] = value;
+    }
+
+    /** true si la pieza se mueve en alguna de las primeras "poses" poses de la accion. */
+    public boolean movesIn(AnimAction a, int poses) {
+        float[] v = moves == null ? null : moves[a.ordinal()];
+        if (v == null) {
+            return false;
+        }
+        int n = Math.min(poses, CustomAnims.MAX_POSES) * CustomAnims.VALUES;
+        for (int i = 0; i < n; i++) {
+            if (v[i] != 0f) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Pone a cero la pieza en una pose. */
+    public void clearMove(AnimAction a, int pose) {
+        for (int k = 0; k < CustomAnims.VALUES; k++) {
+            setMove(a, pose, k, 0f);
+        }
+    }
+
+    public void clearMoves(AnimAction a) {
+        if (moves != null) {
+            moves[a.ordinal()] = null;
+        }
+    }
+
+    private static float[][] copyMoves(float[][] m) {
+        if (m == null) {
+            return null;
+        }
+        float[][] c = new float[AnimAction.COUNT][];
+        for (int a = 0; a < c.length && a < m.length; a++) {
+            c[a] = m[a] == null ? null : m[a].clone();
+        }
+        return c;
+    }
+
     /** Tamano de la pieza en la skin (texels de ancho, alto y fondo; 0 en piezas planas como las aletas). */
     public boolean hasUv() {
         if (uvU < 0 || uvV < 0 || uvW < 0 || uvH < 0 || uvD < 0
@@ -114,6 +190,7 @@ public class CreaturePart {
         c.uvH = uvH;
         c.uvD = uvD;
         c.voxels = voxels == null ? null : voxels.clone();
+        c.moves = copyMoves(moves);
         return c;
     }
 
@@ -131,6 +208,15 @@ public class CreaturePart {
         }
         c.uvMirror = !uvMirror;
         c.voxels = Voxels.mirrorX(voxels, w);
+        if (c.moves != null) {
+            for (float[] v : c.moves) {
+                if (v != null) {
+                    for (int i = 0; i < v.length; i++) {
+                        v[i] *= CustomAnims.MIRROR[i % CustomAnims.VALUES];
+                    }
+                }
+            }
+        }
         return c;
     }
 

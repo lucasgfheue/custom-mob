@@ -139,6 +139,9 @@ public class CreatureDefinition {
     // --- Habilidades (pestana Habilidades) ---
     public Abilities abilities = new Abilities();
 
+    // --- Animaciones propias (pestana Animar; las poses estan en cada pieza) ---
+    public CustomAnims customAnims = new CustomAnims();
+
     // --- Aparicion natural ---
     public boolean naturalSpawn = false;
     public SpawnTime spawnTime = SpawnTime.ANY;
@@ -409,6 +412,10 @@ public class CreatureDefinition {
             abilities = new Abilities();
         }
         abilities.sanitize();
+        if (customAnims == null) {
+            customAnims = new CustomAnims();
+        }
+        customAnims.sanitize(parts);
         if (texW < 8 || texH < 8 || texW > 4096 || texH > 4096) {
             texW = 0;
             texH = 0;

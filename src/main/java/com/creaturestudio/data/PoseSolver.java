@@ -155,6 +155,95 @@ public final class PoseSolver {
         return new float[]{clean(Math.toDegrees(x)), clean(Math.toDegrees(y)), clean(Math.toDegrees(z))};
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Giros como matrices 3x3 guardadas por filas (para posar las piezas con el raton)
+    // ---------------------------------------------------------------------------------------
+
+    /** Angulos en grados {x, y, z} de una matriz de giro (por filas, 9 numeros). */
+    public static float[] eulerOf(float[] r) {
+        return eulerZYX(r[0], r[3], r[6], r[1], r[4], r[7], r[8]);
+    }
+
+    /** Matriz (por filas) de Rz(z) * Ry(y) * Rx(x), con los angulos en grados: el giro de una pieza. */
+    public static float[] rotationZYX(float xDeg, float yDeg, float zDeg) {
+        double x = Math.toRadians(xDeg);
+        double y = Math.toRadians(yDeg);
+        double z = Math.toRadians(zDeg);
+        float cx = (float) Math.cos(x), sx = (float) Math.sin(x);
+        float cy = (float) Math.cos(y), sy = (float) Math.sin(y);
+        float cz = (float) Math.cos(z), sz = (float) Math.sin(z);
+        float[] rz = {cz, -sz, 0f, sz, cz, 0f, 0f, 0f, 1f};
+        float[] ry = {cy, 0f, sy, 0f, 1f, 0f, -sy, 0f, cy};
+        float[] rx = {1f, 0f, 0f, 0f, cx, -sx, 0f, sx, cx};
+        return mul3(mul3(rz, ry), rx);
+    }
+
+    /** Matriz (por filas) de un giro de "angle" radianes alrededor del eje (x, y, z), que no hace falta que mida 1. */
+    public static float[] axisAngle(float x, float y, float z, float angle) {
+        float l = (float) Math.sqrt(x * x + y * y + z * z);
+        if (l < 1.0e-6f) {
+            return new float[]{1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f};
+        }
+        x /= l;
+        y /= l;
+        z /= l;
+        float c = (float) Math.cos(angle);
+        float s = (float) Math.sin(angle);
+        float t = 1f - c;
+        return new float[]{
+                t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+                t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+                t * x * z - s * y, t * y * z + s * x, t * z * z + c};
+    }
+
+    public static float[] mul3(float[] a, float[] b) {
+        float[] r = new float[9];
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+            }
+        }
+        return r;
+    }
+
+    public static float[] transpose3(float[] a) {
+        return new float[]{a[0], a[3], a[6], a[1], a[4], a[7], a[2], a[5], a[8]};
+    }
+
+    /**
+     * Animaciones propias: el giro extra (grados {x, y, z}, que se suma al de reposo de la pieza) que deja la pieza
+     * girada "angle" radianes alrededor del eje (ax, ay, az) del espacio del modelo, partiendo de como estaba con el
+     * giro extra "start". parentRot es el giro de su padre en ese momento (por filas; la identidad si no tiene).
+     * Cada angulo queda lo mas cerca posible de su valor en start (sin saltos de 360).
+     */
+    public static float[] rotateDelta(CreaturePart p, float[] start, float[] parentRot, float ax, float ay, float az,
+                                      float angle) {
+        float[] r0 = rotationZYX(p.rx + start[0], p.ry + start[1], p.rz + start[2]);
+        float[] q = axisAngle(ax, ay, az, angle);
+        float[] r1 = mul3(mul3(mul3(transpose3(parentRot), q), parentRot), r0);
+        float[] e = eulerOf(r1);
+        float[] base = {p.rx, p.ry, p.rz};
+        float[] out = new float[3];
+        for (int k = 0; k < 3; k++) {
+            float d = e[k] - base[k];
+            while (d - start[k] > 180f) {
+                d -= 360f;
+            }
+            while (d - start[k] < -180f) {
+                d += 360f;
+            }
+            // dentro de lo que se guarda (de -360 a 360)
+            while (d > 360f) {
+                d -= 360f;
+            }
+            while (d < -360f) {
+                d += 360f;
+            }
+            out[k] = Math.round(d * 10f) / 10f;
+        }
+        return out;
+    }
+
     /** Quita el ruido de coma flotante (89.99998 -> 90). */
     private static float clean(double degrees) {
         double r = Math.rint(degrees * 1000.0) / 1000.0;

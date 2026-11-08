@@ -31,7 +31,8 @@ public class CreatureEntityModel extends EntityModel<CustomCreature> {
         this.lastMats = null;
         this.lastDef = null;
         boolean flying = entity.isFlyer() && !entity.onGround();
-        this.anim = new AnimState(limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch, this.attackTime, flying);
+        this.anim = new AnimState(limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch, this.attackTime, flying,
+                entity.actionAges(ageInTicks), -1, -1);
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.creaturestudio.entity;
 
+import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.CreatureDefinition;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -52,6 +53,7 @@ class CreatureBeamGoal extends Goal {
             mob.getLookControl().setLookAt(t, 90.0f, 90.0f);
         }
         mob.playSoundId("entity.guardian.attack", 1.0f, 1.0f);
+        mob.playAction(AnimAction.ABILITY);
     }
 
     @Override

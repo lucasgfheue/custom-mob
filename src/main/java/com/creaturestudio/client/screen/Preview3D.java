@@ -6,6 +6,7 @@ import com.creaturestudio.client.render.PaintAtlas;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreaturePart;
 import com.creaturestudio.data.PaintLayout;
+import com.creaturestudio.data.PoseSolver;
 import com.creaturestudio.data.Voxels;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -132,6 +133,61 @@ public class Preview3D {
         Vector3f v = part.transformPosition(x, y, z, new Vector3f());
         view.transformPosition(v);
         return new float[]{v.x, v.y, v.z};
+    }
+
+    /**
+     * El eje que sale de la pantalla hacia quien mira, en el espacio del modelo (mide 1), o null si la vista esta
+     * rota. Girar una pieza alrededor de el la gira en el plano de la pantalla.
+     */
+    @Nullable
+    public static float[] viewAxis(Matrix4f view) {
+        Matrix4f inv = view.invert(new Matrix4f());
+        Vector3f o = inv.transformPosition(0f, 0f, 0f, new Vector3f());
+        Vector3f z = inv.transformPosition(0f, 0f, 1f, new Vector3f());
+        float ax = z.x - o.x;
+        float ay = z.y - o.y;
+        float az = z.z - o.z;
+        float len = (float) Math.sqrt(ax * ax + ay * ay + az * az);
+        if (!(len > 1.0e-6f)) {
+            return null;
+        }
+        return new float[]{ax / len, ay / len, az / len};
+    }
+
+    /**
+     * Hacia donde se ve girar en pantalla un giro positivo alrededor de {@link #viewAxis}: 1 si en el mismo sentido
+     * que el angulo del raton (atan2 de la pantalla, con Y hacia abajo), -1 si al reves.
+     */
+    public static float turnSign(Matrix4f view, float[] axis) {
+        float[] ref = Math.abs(axis[0]) < 0.9f ? new float[]{1f, 0f, 0f} : new float[]{0f, 1f, 0f};
+        float ux = axis[1] * ref[2] - axis[2] * ref[1];
+        float uy = axis[2] * ref[0] - axis[0] * ref[2];
+        float uz = axis[0] * ref[1] - axis[1] * ref[0];
+        float[] q = PoseSolver.axisAngle(axis[0], axis[1], axis[2], 0.3f);
+        float rx = q[0] * ux + q[1] * uy + q[2] * uz;
+        float ry = q[3] * ux + q[4] * uy + q[5] * uz;
+        float rz = q[6] * ux + q[7] * uy + q[8] * uz;
+        Vector3f o = view.transformPosition(0f, 0f, 0f, new Vector3f());
+        Vector3f su = view.transformPosition(ux, uy, uz, new Vector3f());
+        Vector3f sr = view.transformPosition(rx, ry, rz, new Vector3f());
+        double d = Math.atan2(sr.y - o.y, sr.x - o.x) - Math.atan2(su.y - o.y, su.x - o.x);
+        while (d > Math.PI) {
+            d -= Math.PI * 2;
+        }
+        while (d < -Math.PI) {
+            d += Math.PI * 2;
+        }
+        return d >= 0 ? 1f : -1f;
+    }
+
+    /** Giro de una matriz del modelo (por filas, 9 numeros). */
+    public static float[] rotationOf(Matrix4f m) {
+        Vector3f o = m.transformPosition(0f, 0f, 0f, new Vector3f());
+        Vector3f x = m.transformPosition(1f, 0f, 0f, new Vector3f());
+        Vector3f y = m.transformPosition(0f, 1f, 0f, new Vector3f());
+        Vector3f z = m.transformPosition(0f, 0f, 1f, new Vector3f());
+        return new float[]{x.x - o.x, y.x - o.x, z.x - o.x, x.y - o.y, y.y - o.y, z.y - o.y,
+                x.z - o.z, y.z - o.z, z.z - o.z};
     }
 
     /** La misma transformacion que {@link #apply} pero como matriz JOML (para seleccionar piezas). */

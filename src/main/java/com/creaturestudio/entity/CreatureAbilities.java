@@ -1,6 +1,7 @@
 package com.creaturestudio.entity;
 
 import com.creaturestudio.data.Abilities;
+import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureStore;
 import com.creaturestudio.data.HitEffect;
@@ -13,7 +14,6 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -224,6 +224,7 @@ final class CreatureAbilities {
         if (mob.getHealth() < mob.getMaxHealth() * 0.5f) {
             mob.heal(a.selfHealAmount);
             mob.playSoundId("entity.witch.drink", 1.0f, 1.0f);
+            mob.playAction(AnimAction.ABILITY);
             level.sendParticles(ParticleTypes.HEART, mob.getX(), mob.getEyeY(), mob.getZ(), 4, 0.4, 0.3, 0.4, 0.0);
             healTimer = a.selfHealCooldown * 20;
         }
@@ -260,7 +261,7 @@ final class CreatureAbilities {
         summonTimer = a.summonCooldown * 20;
         if (made > 0) {
             mob.playSoundId("entity.evoker.prepare_summon", 1.0f, 1.0f);
-            mob.swing(InteractionHand.MAIN_HAND);
+            mob.playAction(AnimAction.ABILITY);
         }
     }
 

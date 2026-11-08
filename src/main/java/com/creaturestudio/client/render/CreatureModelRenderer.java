@@ -1,5 +1,7 @@
 package com.creaturestudio.client.render;
 
+import com.creaturestudio.data.AnimAction;
+import com.creaturestudio.data.AnimPlayer;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreaturePart;
 import com.creaturestudio.data.MaterialIds;
@@ -48,9 +50,15 @@ public final class CreatureModelRenderer {
         int n = parts.size();
         float[] rot = new float[n * 3];
         float[] off = new float[n * 3];
+        if (s.pinAction() >= 0 && s.pinAction() < AnimAction.COUNT) {
+            AnimPlayer.pin(def, AnimAction.ALL[s.pinAction()], s.pinPose(), rot, off);
+            return PoseSolver.solve(parts, rot, off);
+        }
         for (int i = 0; i < n; i++) {
             animate(parts.get(i), s, rot, off, i * 3);
         }
+        AnimPlayer.apply(def, rot, off, s.limbSwing(), s.limbSwingAmount(), s.ageInTicks(), s.flying(),
+                s.actionAges());
         return PoseSolver.solve(parts, rot, off);
     }
 

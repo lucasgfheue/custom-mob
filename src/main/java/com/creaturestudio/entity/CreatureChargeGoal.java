@@ -1,5 +1,6 @@
 package com.creaturestudio.entity;
 
+import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.CreatureDefinition;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
@@ -51,6 +52,7 @@ class CreatureChargeGoal extends Goal {
         }
         Vec3 flat = new Vec3(t.getX() - mob.getX(), 0.0, t.getZ() - mob.getZ());
         this.dir = flat.lengthSqr() > 1.0e-6 ? flat.normalize() : Vec3.ZERO;
+        mob.playAction(AnimAction.ABILITY);
         mob.getNavigation().stop();
         mob.playSoundId("entity.ravager.roar", 1.0f, 1.0f);
     }
