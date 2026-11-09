@@ -1,11 +1,15 @@
 package com.creaturestudio.data;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Accesorios hechos de minibloques que se ponen sobre una pieza con un clic (casco, corona, cuernos...).
- * Se construyen alrededor de la caja de la pieza: x de 0 a W-1, y de 0 a H-1, z de 0 a D-1; el frente es -Z.
+ * Se construyen alrededor de la caja de la pieza en casillas del tamano elegido: x de 0 a W-1, y de 0 a H-1, z de 0 a
+ * D-1 (W, H y D son lo que mide la pieza en minibloques de ese tamano); el frente es -Z. Con minibloques mas pequenos
+ * sale el mismo accesorio mas fino.
  */
 public enum VoxelTemplate {
     HELMET,
@@ -23,12 +27,18 @@ public enum VoxelTemplate {
         return name().toLowerCase(Locale.ROOT);
     }
 
-    /** Minibloques del accesorio para esa pieza, del color dado. */
+    /** Minibloques del accesorio de 1 pixel para esa pieza, del color dado. */
     public int[] build(CreaturePart p, int rgb) {
-        int w = Math.max(1, Math.round(p.w));
-        int h = Math.max(1, Math.round(p.h));
-        int d = Math.max(1, Math.round(p.d));
-        Builder b = new Builder(rgb);
+        return build(p, rgb, Voxels.DEFAULT_SIZE);
+    }
+
+    /** Minibloques del accesorio para esa pieza, del color y el tamano (ver {@link Voxels#SIZE_KEYS}) dados. */
+    public int[] build(CreaturePart p, int rgb, int size) {
+        float cell = Voxels.pixels(size);
+        int w = Math.max(1, Math.round(p.w / cell));
+        int h = Math.max(1, Math.round(p.h / cell));
+        int d = Math.max(1, Math.round(p.d / cell));
+        Builder b = new Builder(rgb, size);
         switch (this) {
             case HELMET -> {
                 // Casco: cubre la parte de arriba y los lados, con un hueco para la cara
@@ -184,25 +194,30 @@ public enum VoxelTemplate {
         return b.result();
     }
 
-    /** Acumula minibloques sin repetir y descarta los que salen del rango guardable. */
+    /** Acumula minibloques (en casillas de su tamano) sin repetir y descarta los que salen del rango guardable. */
     private static final class Builder {
+        /** Color con su tamano (ver Voxels). */
         private final int rgb;
+        private final int side;
+        private final Set<Integer> seen = new HashSet<>();
         private int[] out = new int[64];
         private int n;
 
-        Builder(int rgb) {
-            this.rgb = rgb & 0xFFFFFF;
+        Builder(int rgb, int size) {
+            this.rgb = Voxels.word(rgb, size);
+            this.side = Voxels.side(size);
         }
 
         void add(int x, int y, int z) {
-            if (!Voxels.inRange(x, y, z)) {
+            int qx = x * side;
+            int qy = y * side;
+            int qz = z * side;
+            if (!Voxels.inRange(qx, qy, qz)) {
                 return;
             }
-            int pos = Voxels.pack(x, y, z);
-            for (int i = 0; i < n; i += 2) {
-                if (out[i] == pos) {
-                    return;
-                }
+            int pos = Voxels.pack(qx, qy, qz);
+            if (!seen.add(pos)) {
+                return;
             }
             if (n + 2 > out.length) {
                 out = Arrays.copyOf(out, out.length * 2);

@@ -210,7 +210,12 @@ public final class CreatureJson {
                 j.addProperty("paint", encodePaint(p.paint));
             }
             if (Voxels.count(p.voxels) > 0) {
-                j.addProperty("voxels", Voxels.encode(p.voxels));
+                // sin tamanos, como antes (lo siguen abriendo versiones anteriores); con tamanos, en "voxels2"
+                if (Voxels.legacy(p.voxels)) {
+                    j.addProperty("voxels", Voxels.encodeLegacy(p.voxels));
+                } else {
+                    j.addProperty("voxels2", Voxels.encode(p.voxels));
+                }
             }
             JsonObject moves = d.customAnims.partToJson(p);
             if (moves != null) {
@@ -445,8 +450,10 @@ public final class CreatureJson {
                 p.animSpeed = num(j, "animSpeed", 1f);
                 readPaint(j, p);
                 readUv(j, p);
-                if (j.has("voxels") && j.get("voxels").isJsonPrimitive()) {
-                    p.voxels = Voxels.decode(j.get("voxels").getAsString());
+                if (j.has("voxels2") && j.get("voxels2").isJsonPrimitive()) {
+                    p.voxels = Voxels.decode(j.get("voxels2").getAsString());
+                } else if (j.has("voxels") && j.get("voxels").isJsonPrimitive()) {
+                    p.voxels = Voxels.decodeLegacy(j.get("voxels").getAsString());
                 }
                 CustomAnims.partFromJson(p, obj(j, "moves"));
                 d.parts.add(p);

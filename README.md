@@ -19,7 +19,7 @@ fila de **pestañas con iconos** (pasa el ratón por encima para ver su nombre; 
 | **Cuerpo** | **Partes del cuerpo ya hechas** (cuerpo de 2 o 4 patas, cabeza, ojos, orejas, cuernos, hocico, antenas, brazos, piernas, patas de araña, cola, alas y aletas): con un clic aparecen colocadas, unidas y animadas. Después, botones para hacerlas más grandes o pequeñas, más anchas, altas o largas, moverlas, y cambiar color y textura, con **simetría** (izquierda y derecha a la vez). |
 | **Piezas** | Árbol con todos los cubos (hasta 128). Añadir, duplicar, espejar en X, borrar, centrar; nombre y «unida a» (jerarquía). |
 | **Forma** | Posición, tamaño, pivote y giro en X/Y/Z (16 píxeles = 1 bloque). |
-| **Pintar** | Dos modos: **pintar píxeles** (importar/exportar skins PNG, pincel, goma, gotero, grosor y color) o **minibloques**: cubitos de un píxel pegados a las piezas para construir cascos, armaduras, coronas... (poner, goma, gotero, pintar encima, espejo y 10 accesorios listos: casco, corona, cuernos, aureola, barba, pechera, cinturón, capa, hombrera y botas). Además, color base con selector HSV y más de 60 texturas. |
+| **Pintar** | Dos modos: **pintar píxeles** (importar/exportar skins PNG, pincel, goma, gotero, grosor y color) o **minibloques**: cubitos pegados a las piezas para construir cascos, armaduras, coronas... de **cinco tamaños** (1/4, 1/2, 1, 2 y 4 píxeles, que se pueden mezclar en una misma pieza: pequeños para los detalles finos, grandes para rellenar rápido). Poner, goma, gotero (copia color y tamaño), pintar encima, espejo y 10 accesorios listos del tamaño elegido: casco, corona, cuernos, aureola, barba, pechera, cinturón, capa, hombrera y botas. Además, color base con selector HSV y más de 60 texturas. |
 | **Animar** | Dos modos: **automáticas** (15 movimientos por pieza: cabeza, piernas, brazos, patas de araña, alas, cola, rebote, mandíbula, giro y balanceo) o **mis animaciones**, hechas con poses para 8 acciones: quieta, caminar, volar, atacar, disparar, habilidad, daño y morir. Hasta 6 poses por acción, botón de **pose contraria** (un paso completo en un clic), velocidad, vista previa y herramienta **Posar** para girar las piezas arrastrándolas. |
 | **Atributos** | Vida, velocidad, armadura, escala y experiencia, y por apartados: **Respawn** (si reaparece al morir, a qué hora, tras cuántos segundos, dónde y cuántas veces), **Melee** (fuerza, alcance, velocidad, empuje y efecto), **Ranged** (puntería, disparos, alcance, cuándo pasa a melee, esperas, ráfagas, sonidos al disparar, acertar y chocar, apuntar quieta y disparo en arco), **Tipo de proyectil** (aspecto, fuerza, tamaño, velocidad, gravedad constante o que acelera, explosión, efecto, estela, brillo, empuje, 3D que gira y se clava o 2D), **Resistencia** (empuje, flechas, cuerpo a cuerpo y explosiones en %), **Regeneración** (normal y en combate), **Rango de visión** (visión, a través de paredes y persecución) y **Otros** (ahogarse, daño por caída, telarañas, pociones, fuego y sol). |
 | **Inventario** | Lo que lleva puesto: casco, pechera, pantalones, botas, mano derecha, mano izquierda, escudo (lo sube al acercarse el enemigo) y proyectil, con la probabilidad de soltarlo; y el **botín al morir**: hasta 10 objetos distintos, cada uno con su cantidad y su probabilidad. Cada hueco tiene un buscador con todos los objetos del juego. |
@@ -57,7 +57,7 @@ montar una criatura pieza a pieza sin tocar números. Pulsa otra vez para volver
 4. Ve a la pestaña **Actions**. La compilación empieza sola (o pulsa **Run workflow**). Tarda unos 5–10 minutos
    la primera vez porque descarga y prepara Minecraft.
 5. Cuando aparezca el círculo verde ✔, entra en la ejecución y descarga el artefacto
-   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.5.0.jar`.
+   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.6.0.jar`.
 
 Para compilar en tu PC: instala Java 21 y ejecuta `gradlew build` (Windows) o `./gradlew build` (Linux/Mac).
 El `.jar` queda en `build/libs/`.
@@ -152,6 +152,8 @@ src/main/resources/        Texturas, modelos, idiomas (es/en), receta y botín
   y solo funcionan con la regla `mobGriefing` activada (como en Minecraft). La explosión daña igual aunque no rompa.
 - **El warden no me encuentra**: solo busca jugadores si su conducta es **Hostil**, y no oye a quien va agachado y quieto.
 - **No veo las herramientas de minibloques**: pestaña **Pintar** → «Minibloques» → **Usar el ratón**.
+- **«Máximo 6000 minibloques por criatura»**: es el límite. Los pequeños gastan muchos (un casco de 1/4 de píxel lleva
+  unas 16 veces más que uno de 1 píxel): úsalos para los detalles y los de 1, 2 o 4 para lo grande.
 - **Mi animación no se ve en el juego**: *Atacar* solo se ve al golpear cuerpo a cuerpo, *Disparar* al disparar,
   *Habilidad* con el grito sónico, el rayo, la embestida, invocar o curarse, y *Volar* solo en las criaturas que
   vuelan. Las piezas que no mueves en tu animación siguen con su animación automática.
