@@ -161,6 +161,13 @@ public final class CreatureJson {
         spawn.addProperty("biomes", d.spawnBiomes);
         spawn.addProperty("chance", d.spawnChance);
         spawn.addProperty("max", d.spawnMax);
+        spawn.addProperty("place", d.spawnPlace.key());
+        JsonArray structures = new JsonArray();
+        for (SpawnStructure st : d.spawnStructures) {
+            structures.add(st.key());
+        }
+        spawn.add("structures", structures);
+        spawn.addProperty("structureIds", d.spawnStructureIds);
         o.add("spawn", spawn);
 
         JsonArray egg = new JsonArray();
@@ -372,6 +379,19 @@ public final class CreatureJson {
             d.spawnBiomes = str(spawn, "biomes", "");
             d.spawnChance = integer(spawn, "chance", d.spawnChance);
             d.spawnMax = integer(spawn, "max", d.spawnMax);
+            d.spawnPlace = SpawnPlace.byKey(str(spawn, "place", ""), SpawnPlace.SURFACE);
+            d.spawnStructures = java.util.EnumSet.noneOf(SpawnStructure.class);
+            if (spawn.has("structures") && spawn.get("structures").isJsonArray()) {
+                for (JsonElement e : spawn.getAsJsonArray("structures")) {
+                    if (e.isJsonPrimitive()) {
+                        SpawnStructure st = SpawnStructure.byKey(e.getAsString());
+                        if (st != null) {
+                            d.spawnStructures.add(st);
+                        }
+                    }
+                }
+            }
+            d.spawnStructureIds = str(spawn, "structureIds", "");
         }
 
         if (o.has("eggColors") && o.get("eggColors").isJsonArray()) {

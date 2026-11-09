@@ -5,6 +5,7 @@ import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -148,6 +149,12 @@ public class CreatureDefinition {
     public String spawnBiomes = "";
     public int spawnChance = 10;
     public int spawnMax = 4;
+    /** Donde busca sitio (si no hay estructuras elegidas). */
+    public SpawnPlace spawnPlace = SpawnPlace.SURFACE;
+    /** Si no esta vacio, solo aparece dentro de estas estructuras (o de las de {@link #spawnStructureIds}). */
+    public EnumSet<SpawnStructure> spawnStructures = EnumSet.noneOf(SpawnStructure.class);
+    /** Otras estructuras (de otros mods), separadas por comas; las etiquetas empiezan por #. */
+    public String spawnStructureIds = "";
 
     // --- Huevo ---
     public int eggColor1 = 0x7A5230;
@@ -359,6 +366,9 @@ public class CreatureDefinition {
         }
 
         spawnBiomes = cleanBiomes(spawnBiomes);
+        if (spawnPlace == null) spawnPlace = SpawnPlace.SURFACE;
+        if (spawnStructures == null) spawnStructures = EnumSet.noneOf(SpawnStructure.class);
+        spawnStructureIds = cleanBiomes(spawnStructureIds);
         spawnChance = clampInt(spawnChance, 1, 100);
         spawnMax = clampInt(spawnMax, 1, 32);
 
@@ -536,6 +546,27 @@ public class CreatureDefinition {
     }
 
     /** Lista de biomas o etiquetas separados por comas: "minecraft:plains, #minecraft:is_forest". */
+    /** true si solo aparece dentro de estructuras. */
+    public boolean spawnsInStructures() {
+        return !spawnStructures.isEmpty() || !spawnStructureIds.isEmpty();
+    }
+
+    /** Todos los ids y etiquetas (#) de estructuras en los que puede aparecer. */
+    public List<String> structureTargets() {
+        List<String> out = new ArrayList<>();
+        for (SpawnStructure st : spawnStructures) {
+            out.add(st.target);
+        }
+        if (!spawnStructureIds.isEmpty()) {
+            for (String t : spawnStructureIds.split(",")) {
+                if (!t.isBlank() && !out.contains(t.trim())) {
+                    out.add(t.trim());
+                }
+            }
+        }
+        return out;
+    }
+
     public static String cleanBiomes(String s) {
         if (s == null || s.isBlank()) {
             return "";

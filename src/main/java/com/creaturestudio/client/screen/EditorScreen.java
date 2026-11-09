@@ -38,6 +38,8 @@ import com.creaturestudio.data.PoseSolver;
 import com.creaturestudio.data.RangedType;
 import com.creaturestudio.data.SkinLayout;
 import com.creaturestudio.data.SoundPreset;
+import com.creaturestudio.data.SpawnPlace;
+import com.creaturestudio.data.SpawnStructure;
 import com.creaturestudio.data.SpawnTime;
 import com.creaturestudio.data.Templates;
 import com.creaturestudio.network.ModNetwork;
@@ -82,6 +84,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -2325,6 +2328,33 @@ public class EditorScreen extends Screen {
                 1f, 32f, 1f, true);
         y += 6;
 
+        y = section(y, Ui.tr("spawn.where_section"));
+        y = text(y, Ui.tr("spawn.where_intro"), Ui.MUTED) + 4;
+        y = smallLabel(y, Ui.tr("spawn.place"));
+        y = chips(y, SpawnPlace.values(), 2, () -> def.spawnPlace, v -> def.spawnPlace = v,
+                v -> Ui.tr("spawn_place." + v.key()), v -> Ui.tr("spawn_place." + v.key() + ".tip")) + 6;
+        y = smallLabel(y, Ui.tr("spawn.structures"));
+        y = toggleChips(y, SpawnStructure.values(), 2, v -> def.spawnStructures.contains(v), v -> {
+            if (!def.spawnStructures.remove(v)) {
+                def.spawnStructures.add(v);
+            }
+        }, v -> Ui.tr("structure." + v.key()), v -> Ui.tr("structure." + v.key() + ".tip")) + 4;
+        int lw2 = labelWidth("spawn.structure_ids");
+        label(0, y, Ui.tr("spawn.structure_ids"));
+        textBox(lw2, y, contentW - lw2, 512, def.spawnStructureIds, s -> {
+            def.spawnStructureIds = s;
+            markChanged();
+        }, Ui.tr("spawn.structure_ids_hint"));
+        y += ROW;
+        button(0, y, contentW, Ui.tr("spawn.structures_clear"), b -> {
+            def.spawnStructures.clear();
+            def.spawnStructureIds = "";
+            markChanged();
+            requestRebuild();
+        }, Ui.tr("spawn.structures_clear_tip"));
+        y += ROW;
+        y = text(y, Ui.tr("spawn.where_hint"), HINT) + 8;
+
         y = text(y, Ui.tr("spawn.loot_moved"), HINT) + 8;
 
         y = section(y, Ui.tr("egg.section"));
@@ -2539,6 +2569,14 @@ public class EditorScreen extends Screen {
     private <E> int chips(int y, E[] values, int columns, Supplier<E> getter, Consumer<E> setter,
                           Function<E, Component> name, @Nullable Function<E, Component> tip) {
         Chips<E> group = add(new Chips<>(0, y, contentW, values, columns, getter, setter, name, tip));
+        return y + group.h;
+    }
+
+    /** Fichas en las que se pueden marcar varias a la vez (cada clic marca o desmarca). */
+    private <E> int toggleChips(int y, E[] values, int columns, Predicate<E> isOn, Consumer<E> toggle,
+                                Function<E, Component> name, @Nullable Function<E, Component> tip) {
+        Chips<E> group = add(new Chips<>(0, y, contentW, values, columns, () -> null, toggle, name, tip));
+        group.multi = isOn;
         return y + group.h;
     }
 
@@ -4855,6 +4893,9 @@ public class EditorScreen extends Screen {
         private final int[] rx;
         private final int[] ry;
         private final int[] rw;
+        /** Si no es null, se pueden marcar varias: cada clic llama al setter, que la marca o desmarca. */
+        @Nullable
+        Predicate<E> multi;
 
         Chips(int x, int y, int w, E[] values, int columns, Supplier<E> getter, Consumer<E> setter,
               Function<E, Component> name, @Nullable Function<E, Component> tipFor) {
@@ -4909,8 +4950,8 @@ public class EditorScreen extends Screen {
             E current = getter.get();
             int hovered = indexAt(mx, my);
             for (int i = 0; i < values.length; i++) {
-                chip(g, left() + rx[i], top() + ry[i], rw[i], CHIP_H, name.apply(values[i]),
-                        Objects.equals(values[i], current), i == hovered);
+                boolean on = multi != null ? multi.test(values[i]) : Objects.equals(values[i], current);
+                chip(g, left() + rx[i], top() + ry[i], rw[i], CHIP_H, name.apply(values[i]), on, i == hovered);
             }
         }
 
@@ -4920,7 +4961,7 @@ public class EditorScreen extends Screen {
             if (i < 0) {
                 return false;
             }
-            if (!Objects.equals(values[i], getter.get())) {
+            if (multi != null || !Objects.equals(values[i], getter.get())) {
                 setter.accept(values[i]);
                 markChanged();
             }

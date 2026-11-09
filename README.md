@@ -25,7 +25,7 @@ fila de **pestañas con iconos** (pasa el ratón por encima para ver su nombre; 
 | **Inventario** | Lo que lleva puesto: casco, pechera, pantalones, botas, mano derecha, mano izquierda, escudo (lo sube al acercarse el enemigo) y proyectil, con la probabilidad de soltarlo; y el **botín al morir**: hasta 10 objetos distintos, cada uno con su cantidad y su probabilidad. Cada hueco tiene un buscador con todos los objetos del juego. |
 | **Conducta** | Pasiva, neutral u hostil; camina o vuela; 27 sonidos; ítem que la atrae. |
 | **Habilidades** | Poderes de los mobs de Minecraft, cada uno con sus ajustes: creeper (explota si te acercas: pequeña, mediana o grande), warden (no ve pero oye; grito sónico), enderman (se teletransporta; se enoja si lo miras), guardián (rayo; espinas), guardián anciano (aura con efecto), slime (se divide), araña (trepa paredes; salta), gólem de hierro (lanza por los aires), bruja (se cura), invocador (invoca ayudantes), devastador (embestida), lobo (manada), calamar (tinta), breeze (rebota proyectiles), gallina (cae despacio; pone huevos), vaca (se ordeña), zombi/aldeano (abre o rompe puertas), gólem de nieve (deja rastro), calamar luminoso (brilla), zorro (recoge objetos) y miedo a otro mob. |
-| **Aparición** | Aparición natural (horario, biomas, probabilidad) y colores del huevo. |
+| **Aparición** | Aparición natural (horario, biomas, probabilidad) y **dónde aparece**: en la superficie, bajo tierra, en el agua o en el cielo, o solo dentro de **estructuras** (aldeas, puestos de saqueadores, mansiones, templos, cabañas de bruja, iglús, ruinas, portales en ruinas, minas, fortalezas, cámaras de desafío, ciudades antiguas, monumentos, barcos hundidos, fortalezas del Nether, bastiones, ciudades del End y estructuras de otros mods por su id). También los colores del huevo. |
 
 **Modo fácil** (botón «Modo fácil» arriba): deja solo las pestañas **Cuerpo**, **Plantillas** y **Pintar**, para
 montar una criatura pieza a pieza sin tocar números. Pulsa otra vez para volver a ver todas las pestañas.
@@ -57,7 +57,7 @@ montar una criatura pieza a pieza sin tocar números. Pulsa otra vez para volver
 4. Ve a la pestaña **Actions**. La compilación empieza sola (o pulsa **Run workflow**). Tarda unos 5–10 minutos
    la primera vez porque descarga y prepara Minecraft.
 5. Cuando aparezca el círculo verde ✔, entra en la ejecución y descarga el artefacto
-   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.4.0.jar`.
+   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.5.0.jar`.
 
 Para compilar en tu PC: instala Java 21 y ejecuta `gradlew build` (Windows) o `./gradlew build` (Linux/Mac).
 El `.jar` queda en `build/libs/`.
@@ -157,6 +157,8 @@ src/main/resources/        Texturas, modelos, idiomas (es/en), receta y botín
   vuelan. Las piezas que no mueves en tu animación siguen con su animación automática.
 - **Las criaturas de antes de la versión 1.2.0**: se abren igual. Su botín pasa a la lista del Inventario y su
   tipo de disparo recibe los valores típicos del proyectil.
+- **No aparece en la estructura que elegí**: solo aparece cuando un jugador está cerca de esa estructura (a unos 50 bloques), dentro de sus piezas y donde quepa. Comprueba también los **Biomas** (vacío = cualquiera) y el **Horario**. Las estructuras que se crearon antes de instalar el mod también valen.
+- **No aparece bajo tierra**: necesita cuevas o huecos sin cielo encima cerca del jugador. En el Nether, «En la superficie» busca en los huecos (el Nether no tiene superficie).
 - **La skin no encaja**: la imagen tiene que tener el formato del modelo que cargaste (por ejemplo, una skin de
   aldeano en el modelo de aldeano). Si tu criatura es propia, usa **Exportar skin** para obtener su plantilla.
 
