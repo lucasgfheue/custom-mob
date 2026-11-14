@@ -71,6 +71,31 @@ public class Abilities {
     // Arana: trepa paredes y salta sobre su objetivo
     public boolean climb;
     public boolean leap;
+    /** Arana: neutral con luz (de dia) y hostil a oscuras (de noche y en las cuevas). */
+    public boolean nightHostile;
+
+    // Explota cuando le queda poca vida (o al morir)
+    public boolean lastBlast;
+    /** Corazones (1 corazon = 2 de vida) con los que se hincha y explota; 0 = solo al morir. */
+    public float lastBlastHearts = 2f;
+    public ExplosionSize lastBlastSize = ExplosionSize.MEDIUM;
+    /** Ticks que se hincha antes de explotar (0 = al instante). */
+    public int lastBlastFuse = 30;
+
+    // Roba vida: se cura con el dano que hace
+    public boolean lifeSteal;
+    /** Parte del dano que hace que recupera (%). */
+    public int lifeStealPercent = 50;
+
+    // Come para curarse
+    public boolean eat;
+    /** Come cuando le quedan estos corazones o menos. */
+    public float eatHearts = 4f;
+    /** Comida que lleva encima y cuantas. */
+    public String eatItem = "minecraft:cooked_beef";
+    public int eatCount = 3;
+    /** Tambien va a comerse la comida que vea tirada cerca. */
+    public boolean eatGround = true;
 
     // Golem de hierro: lanza por los aires al golpear
     public boolean launch;
@@ -180,6 +205,18 @@ public class Abilities {
         c.splitGenerations = splitGenerations;
         c.climb = climb;
         c.leap = leap;
+        c.nightHostile = nightHostile;
+        c.lastBlast = lastBlast;
+        c.lastBlastHearts = lastBlastHearts;
+        c.lastBlastSize = lastBlastSize;
+        c.lastBlastFuse = lastBlastFuse;
+        c.lifeSteal = lifeSteal;
+        c.lifeStealPercent = lifeStealPercent;
+        c.eat = eat;
+        c.eatHearts = eatHearts;
+        c.eatItem = eatItem;
+        c.eatCount = eatCount;
+        c.eatGround = eatGround;
         c.launch = launch;
         c.launchPower = launchPower;
         c.selfHeal = selfHeal;
@@ -223,7 +260,7 @@ public class Abilities {
     public int activeCount() {
         boolean[] all = {explode, blind, sonicBoom, teleport, stareAnger, beam, thorns, aura, split, climb, leap,
                 launch, selfHeal, summon, charge, pack, ink, deflect, slowFall, layItems, milkable,
-                doors != DoorMode.NONE, trail, glows, pickUp, fear};
+                doors != DoorMode.NONE, trail, glows, pickUp, fear, nightHostile, lastBlast, lifeSteal, eat};
         int n = 0;
         for (boolean b : all) {
             if (b) {
@@ -258,6 +295,15 @@ public class Abilities {
         splitCount = clamp(splitCount, 2, 4);
         splitGenerations = clamp(splitGenerations, 1, 3);
         launchPower = clamp(launchPower, 0.1f, 5f, 1f);
+        lastBlastHearts = clamp(lastBlastHearts, 0f, 512f, 2f);
+        if (lastBlastSize == null || lastBlastSize == ExplosionSize.NONE) {
+            lastBlastSize = ExplosionSize.MEDIUM;
+        }
+        lastBlastFuse = clamp(lastBlastFuse, 0, 200);
+        lifeStealPercent = clamp(lifeStealPercent, 1, 200);
+        eatHearts = clamp(eatHearts, 0.5f, 512f, 4f);
+        eatItem = CreatureDefinition.cleanResource(eatItem);
+        eatCount = clamp(eatCount, 0, 64);
         selfHealAmount = clamp(selfHealAmount, 1f, 1024f, 6f);
         selfHealCooldown = clamp(selfHealCooldown, 1, 600);
         summonEntity = cleanId(summonEntity, "minecraft:vex");
@@ -361,6 +407,21 @@ public class Abilities {
         o.add("split", sp);
         o.addProperty("climb", climb);
         o.addProperty("leap", leap);
+        o.addProperty("nightHostile", nightHostile);
+        JsonObject lb = on(lastBlast);
+        lb.addProperty("hearts", lastBlastHearts);
+        lb.addProperty("size", lastBlastSize.key());
+        lb.addProperty("fuse", lastBlastFuse);
+        o.add("lastBlast", lb);
+        JsonObject ls = on(lifeSteal);
+        ls.addProperty("percent", lifeStealPercent);
+        o.add("lifeSteal", ls);
+        JsonObject ea = on(eat);
+        ea.addProperty("hearts", eatHearts);
+        ea.addProperty("item", eatItem);
+        ea.addProperty("count", eatCount);
+        ea.addProperty("ground", eatGround);
+        o.add("eat", ea);
         JsonObject l = on(launch);
         l.addProperty("power", launchPower);
         o.add("launch", l);
@@ -460,6 +521,21 @@ public class Abilities {
         r.splitGenerations = (int) num(sp, "generations", r.splitGenerations);
         r.climb = bool(o, "climb", false);
         r.leap = bool(o, "leap", false);
+        r.nightHostile = bool(o, "nightHostile", false);
+        JsonObject lb = obj(o, "lastBlast");
+        r.lastBlast = bool(lb, "on", false);
+        r.lastBlastHearts = num(lb, "hearts", r.lastBlastHearts);
+        r.lastBlastSize = enumValue(ExplosionSize.class, str(lb, "size", ""), r.lastBlastSize);
+        r.lastBlastFuse = (int) num(lb, "fuse", r.lastBlastFuse);
+        JsonObject ls = obj(o, "lifeSteal");
+        r.lifeSteal = bool(ls, "on", false);
+        r.lifeStealPercent = (int) num(ls, "percent", r.lifeStealPercent);
+        JsonObject ea = obj(o, "eat");
+        r.eat = bool(ea, "on", false);
+        r.eatHearts = num(ea, "hearts", r.eatHearts);
+        r.eatItem = str(ea, "item", r.eatItem);
+        r.eatCount = (int) num(ea, "count", r.eatCount);
+        r.eatGround = bool(ea, "ground", r.eatGround);
         JsonObject l = obj(o, "launch");
         r.launch = bool(l, "on", false);
         r.launchPower = num(l, "power", r.launchPower);

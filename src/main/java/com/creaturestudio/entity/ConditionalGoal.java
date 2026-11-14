@@ -11,10 +11,17 @@ import java.util.function.BooleanSupplier;
 public class ConditionalGoal extends Goal {
     private final Goal inner;
     private final BooleanSupplier condition;
+    /** Condicion para seguir una vez empezado (puede ser mas suave que la de empezar). */
+    private final BooleanSupplier keepGoing;
 
     public ConditionalGoal(Goal inner, BooleanSupplier condition) {
+        this(inner, condition, condition);
+    }
+
+    public ConditionalGoal(Goal inner, BooleanSupplier condition, BooleanSupplier keepGoing) {
         this.inner = inner;
         this.condition = condition;
+        this.keepGoing = keepGoing;
         this.setFlags(inner.getFlags());
     }
 
@@ -25,7 +32,7 @@ public class ConditionalGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
-        return condition.getAsBoolean() && inner.canContinueToUse();
+        return keepGoing.getAsBoolean() && inner.canContinueToUse();
     }
 
     @Override

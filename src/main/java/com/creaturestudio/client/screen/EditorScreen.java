@@ -13,6 +13,7 @@ import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.AnimPlayer;
 import com.creaturestudio.data.CustomAnims;
 import com.creaturestudio.data.Behavior;
+import com.creaturestudio.data.BreakPlan;
 import com.creaturestudio.data.CreatureDrop;
 import com.creaturestudio.data.DoorMode;
 import com.creaturestudio.data.ExplosionSize;
@@ -36,6 +37,7 @@ import com.creaturestudio.data.Movement;
 import com.creaturestudio.data.PartAnim;
 import com.creaturestudio.data.PoseSolver;
 import com.creaturestudio.data.RangedType;
+import com.creaturestudio.data.Recolor;
 import com.creaturestudio.data.SkinLayout;
 import com.creaturestudio.data.SoundPreset;
 import com.creaturestudio.data.SpawnPlace;
@@ -66,6 +68,7 @@ import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.lwjgl.glfw.GLFW;
@@ -352,6 +355,20 @@ public class EditorScreen extends Screen {
     private final java.util.Set<Long> strokeVoxels = new java.util.HashSet<>();
     private double paintLastX;
     private double paintLastY;
+
+    // Pintar toda la criatura: foto de los colores de antes, color que se cambia y color nuevo
+    private boolean recolorOpen;
+    @Nullable
+    private Recolor.Snapshot recolorSnap;
+    private int[] recolorColors = new int[0];
+    /** Cual de los colores de la criatura se cambia (0 = el que mas se ve). */
+    private int recolorIndex;
+    private int recolorFrom = -1;
+    private int recolorTo = -1;
+    private boolean recolorOnly;
+    /** Estado guardado (committed) justo despues del ultimo cambio de color: si cambia por otra cosa, foto nueva. */
+    @Nullable
+    private String recolorStamp;
 
     // Pintura en la vista 3D
     private final PaintAtlas editorPaint = new PaintAtlas(
@@ -898,6 +915,7 @@ public class EditorScreen extends Screen {
         if (p == null) {
             return noParts(y);
         }
+        y = buildRecolor(y);
         y = pieceSelector(y);
         y = smallLabel(y, Ui.tr("paint.mode"));
         y = chips(y, NO_YES, 2, () -> voxelMode, v -> {
@@ -999,6 +1017,110 @@ public class EditorScreen extends Screen {
         material.setTextColor(Materials.exists(p.material) ? Ui.TEXT : Ui.ERROR);
         y += ROW + 4;
         return text(y, Ui.tr("editor.hint.look"), HINT);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Pintar toda la criatura
+    // ---------------------------------------------------------------------------------------
+
+    /** Boton que abre la seccion y, abierta, los colores de la criatura y el color nuevo. */
+    private int buildRecolor(int y) {
+        button(0, y, contentW, Ui.tr(recolorOpen ? "recolor.close" : "recolor.open"), b -> {
+            recolorOpen = !recolorOpen;
+            recolorSnap = null;
+            requestRebuild();
+        }, Ui.tr("recolor.open_tip"));
+        y += ROW + 4;
+        if (!recolorOpen) {
+            return y + 2;
+        }
+        y = section(y, Ui.tr("recolor.section"));
+        if (recolorStale()) {
+            startRecolor(-1);
+        }
+        if (recolorColors.length == 0) {
+            return text(y, Ui.tr("recolor.none"), HINT) + 8;
+        }
+        y = smallLabel(y, Ui.tr("recolor.from"));
+        ColorChoices choices = add(new ColorChoices(0, y, contentW));
+        y += choices.h + 6;
+        y = chips(y, NO_YES, 2, () -> recolorOnly, v -> {
+            recolorOnly = v;
+            if (!recolorStale()) {
+                applyRecolor();
+            }
+        }, v -> Ui.tr(v ? "recolor.only" : "recolor.all"), v -> Ui.tr(v ? "recolor.only_tip" : "recolor.all_tip")) + 4;
+        y = smallLabel(y, Ui.tr("recolor.to"));
+        IntSupplier target = () -> recolorTo & 0xFFFFFF;
+        IntConsumer setTarget = this::recolorTo;
+        add(new ColorPicker(0, y, contentW, 50, target, setTarget));
+        y += 50 + 5;
+        add(new Swatch(0, y, FIELD_H, target));
+        hexBox(FIELD_H + 4, y, 58, target, setTarget);
+        y += ROW;
+        Palette palette = add(new Palette(0, y, contentW, target, setTarget));
+        y += palette.h + 6;
+        int half = (contentW - GAP) / 2;
+        button(0, y, half, Ui.tr("recolor.reset"), b -> recolorTo(recolorFrom), Ui.tr("recolor.reset_tip"));
+        button(half + GAP, y, contentW - half - GAP, Ui.tr("recolor.done"), b -> {
+            recolorOpen = false;
+            recolorSnap = null;
+            requestRebuild();
+        }, null);
+        y += ROW + 2;
+        return text(y, Ui.tr("recolor.hint"), HINT) + 10;
+    }
+
+    /** La foto ya no vale: se ha cambiado otra cosa (o se ha deshecho) despues del ultimo cambio de color. */
+    private boolean recolorStale() {
+        return recolorSnap == null || !Objects.equals(recolorStamp, committed) || !recolorSnap.fits(def);
+    }
+
+    /**
+     * Empieza de nuevo desde como esta ahora la criatura, con el color numero index como el que se cambia (-1 = el
+     * mismo numero que antes).
+     */
+    private void startRecolor(int index) {
+        recolorSnap = Recolor.snapshot(def);
+        recolorColors = Recolor.mainColors(def);
+        recolorStamp = committed;
+        if (recolorColors.length == 0) {
+            recolorFrom = -1;
+            recolorTo = -1;
+            return;
+        }
+        recolorIndex = Mth.clamp(index < 0 ? recolorIndex : index, 0, recolorColors.length - 1);
+        recolorFrom = recolorColors[recolorIndex];
+        recolorTo = recolorFrom;
+    }
+
+    /** Elegir otro color de la criatura para cambiar: lo de antes se queda como esta. */
+    private void chooseRecolor(int index) {
+        startRecolor(index);
+        refreshFields();
+    }
+
+    /** Color nuevo elegido: se cambia toda la criatura desde la foto. */
+    private void recolorTo(int rgb) {
+        if (recolorStale()) {
+            startRecolor(-1);
+        }
+        if (recolorFrom < 0) {
+            return;
+        }
+        recolorTo = rgb & 0xFFFFFF;
+        applyRecolor();
+        refreshFields();
+    }
+
+    /** Pone los colores cambiados (desde la foto) y lo apunta en Deshacer (arrastrando el selector es un solo paso). */
+    private void applyRecolor() {
+        if (recolorSnap == null || recolorFrom < 0) {
+            return;
+        }
+        Recolor.apply(def, recolorSnap, recolorFrom, recolorTo, recolorOnly);
+        markChanged();
+        recolorStamp = committed;
     }
 
     // ---------------------------------------------------------------------------------------
@@ -1696,6 +1818,9 @@ public class EditorScreen extends Screen {
         y = numField(y, "range.follow", () -> def.followRange, v -> def.followRange = v, 4f, 128f, 1f, false);
         y = text(y, Ui.tr("range.hint"), HINT) + 6;
 
+        // Romper bloques
+        y = buildBreakSection(y);
+
         // Otros
         y = section(y, Ui.tr("stats.other"));
         y = toggleRow(y, "other.can_drown", () -> def.canDrown, v -> def.canDrown = v, null);
@@ -1943,6 +2068,204 @@ public class EditorScreen extends Screen {
     }
 
     // ---------------------------------------------------------------------------------------
+    // Romper bloques (pestana Atributos)
+    // ---------------------------------------------------------------------------------------
+
+    /** Grupos rapidos de bloques: nombre, etiqueta y su icono. */
+    private static final String[] BREAK_GROUPS = {"dirt", "stone", "wood", "leaves", "glass", "doors"};
+    private static final String[] BREAK_GROUP_TAGS = {"#minecraft:mineable/shovel", "#minecraft:mineable/pickaxe",
+            "#minecraft:mineable/axe", "#minecraft:leaves", "#c:glass_blocks", "#minecraft:doors"};
+
+    private int buildBreakSection(int y) {
+        y = section(y, Ui.tr("stats.break"));
+        y = toggleRow(y, "break.enabled", () -> def.breakBlocks, v -> {
+            def.breakBlocks = v;
+            requestRebuild();
+        }, "break.enabled_tip");
+        if (!def.breakBlocks) {
+            return y + 6;
+        }
+        y = smallLabel(y, Ui.tr("break.which"));
+        y = chips(y, YES_NO, 2, () -> def.breakAll, v -> {
+            def.breakAll = v;
+            requestRebuild();
+        }, v -> Ui.tr(v ? "break.all" : "break.list"), v -> Ui.tr(v ? "break.all_tip" : "break.list_tip")) + 4;
+        if (!def.breakAll) {
+            for (int i = 0; i < def.breakList.size(); i++) {
+                y = breakRow(y, i);
+            }
+            if (def.breakList.size() < CreatureDefinition.MAX_BREAK_BLOCKS) {
+                button(0, y, contentW, Ui.tr("break.add"), b -> {
+                    def.breakList.add("");
+                    markChanged();
+                    requestRebuild();
+                }, Ui.tr("break.add_tip"));
+                y += ROW;
+            }
+            y = smallLabel(y, Ui.tr("break.quick"));
+            int cols = 3;
+            int cw = (contentW - GAP * (cols - 1)) / cols;
+            for (int i = 0; i < BREAK_GROUPS.length; i++) {
+                String tag = BREAK_GROUP_TAGS[i];
+                int col = i % cols;
+                int bw = col == cols - 1 ? contentW - (cw + GAP) * (cols - 1) : cw;
+                button(col * (cw + GAP), y, bw, Ui.tr("break.group." + BREAK_GROUPS[i]), b -> {
+                    if (!def.breakList.contains(tag) && def.breakList.size() < CreatureDefinition.MAX_BREAK_BLOCKS) {
+                        def.breakList.removeIf(String::isBlank);
+                        def.breakList.add(tag);
+                        markChanged();
+                        requestRebuild();
+                    }
+                }, Ui.tr("break.group." + BREAK_GROUPS[i] + ".tip"));
+                if (col == cols - 1 || i == BREAK_GROUPS.length - 1) {
+                    y += ROW;
+                }
+            }
+            if (def.breakList.stream().allMatch(String::isBlank)) {
+                y = text(y, Ui.tr("break.empty"), WARN) + 2;
+            }
+            y += 2;
+        }
+        y = numField(y, "break.time", () -> def.breakTime, v -> def.breakTime = v, 0f, BreakPlan.MAX_SECONDS, 0.25f, false);
+        y = toggleRow(y, "break.hardness", () -> def.breakByHardness, v -> def.breakByHardness = v, "break.hardness_tip");
+        y = numField(y, "break.count", () -> (float) def.breakCount, v -> def.breakCount = Math.round(v),
+                1f, BreakPlan.MAX_COUNT, 1f, true);
+        if (def.behavior == Behavior.PASSIVE && !def.abilities.nightHostile && !def.abilities.stareAnger) {
+            y = text(y, Ui.tr("break.passive"), WARN) + 2;
+        }
+        return text(y, Ui.tr("break.hint"), HINT) + 6;
+    }
+
+    /** Un bloque de la lista (o una etiqueta con #) con su boton de quitar. */
+    private int breakRow(int y, int index) {
+        int delW = 16;
+        blockField(0, y, contentW - delW - GAP, () -> index < def.breakList.size() ? def.breakList.get(index) : "", v -> {
+            if (index < def.breakList.size()) {
+                def.breakList.set(index, v);
+            }
+        });
+        button(contentW - delW, y, delW, Component.literal("\u2715"), b -> {
+            if (index < def.breakList.size()) {
+                def.breakList.remove(index);
+                markChanged();
+                requestRebuild();
+            }
+        }, Ui.tr("break.remove"));
+        return y + ROW;
+    }
+
+    /** Campo de un bloque con su icono y un boton para buscarlo en la lista de bloques del juego. */
+    private void blockField(int x, int y, int w, Supplier<String> getter, Consumer<String> setter) {
+        int pickW = 14;
+        EditBox box = textBox(x, y, Math.max(20, w - FIELD_H - pickW - 4), 128, getter.get(), v -> {
+            setter.accept(v.trim());
+            markChanged();
+        }, Ui.tr("field.block_hint"));
+        box.setTextColor(blockColor(getter.get()));
+        refreshers.add(() -> box.setTextColor(blockColor(getter.get())));
+        add(new ItemIcon(x + w - FIELD_H - pickW - 2, y, getter, EditorScreen::blockIcon));
+        add(new DropButton(x + w - pickW, y, pickW, Component::empty, () -> -1, Ui.tr("field.block_pick"),
+                anchor -> openBlockDropdown(anchor.left() - (w - pickW), anchor.top(), w, anchor.h, box.getValue(),
+                        id -> {
+                            setter.accept(id);
+                            box.setValue(id);
+                            markChanged();
+                        })));
+    }
+
+    @Nullable
+    private static Block resolveBlock(String id) {
+        String clean = CreatureDefinition.cleanResource(id);
+        if (clean.isEmpty()) {
+            return null;
+        }
+        ResourceLocation rl = ResourceLocation.tryParse(clean);
+        if (rl == null || !BuiltInRegistries.BLOCK.containsKey(rl)) {
+            return null;
+        }
+        return BuiltInRegistries.BLOCK.get(rl);
+    }
+
+    private static int blockColor(String id) {
+        if (id == null || id.isBlank()) {
+            return Ui.TEXT;
+        }
+        if (id.trim().startsWith("#")) {
+            return BreakPlan.cleanEntry(id).isEmpty() ? Ui.ERROR : Ui.OK;
+        }
+        return resolveBlock(id) == null ? Ui.ERROR : Ui.OK;
+    }
+
+    /** Icono de un bloque (o el de su grupo, si es una de las etiquetas rapidas). */
+    private static ItemStack blockIcon(String id) {
+        String clean = BreakPlan.cleanEntry(id);
+        if (clean.startsWith("#")) {
+            Item[] icons = {Items.DIRT, Items.STONE, Items.OAK_LOG, Items.OAK_LEAVES, Items.GLASS, Items.OAK_DOOR};
+            for (int i = 0; i < BREAK_GROUP_TAGS.length; i++) {
+                if (BREAK_GROUP_TAGS[i].equals(clean)) {
+                    return new ItemStack(icons[i]);
+                }
+            }
+            return ItemStack.EMPTY;
+        }
+        Block block = resolveBlock(id);
+        if (block == null) {
+            return ItemStack.EMPTY;
+        }
+        Item item = block.asItem();
+        return item == Items.AIR ? ItemStack.EMPTY : new ItemStack(item);
+    }
+
+    @Nullable
+    private static List<ResourceLocation> blockIds;
+
+    private static List<ResourceLocation> blockIds() {
+        if (blockIds == null) {
+            List<ResourceLocation> ids = new ArrayList<>(BuiltInRegistries.BLOCK.keySet());
+            ids.sort((a, b) -> a.getPath().compareTo(b.getPath()));
+            blockIds = ids;
+        }
+        return blockIds;
+    }
+
+    /** Lista de bloques del juego (como la de objetos): entera con el elegido marcado, o los que contienen lo escrito. */
+    private void openBlockDropdown(int ax, int ay, int aw, int ah, String filter, Consumer<String> onPick) {
+        String current = resolveBlock(filter) == null ? "" : CreatureDefinition.cleanResource(filter);
+        String q = current.isEmpty() ? filter.trim().toLowerCase(Locale.ROOT) : "";
+        if (q.startsWith("#")) {
+            q = "";
+        }
+        if (q.startsWith("minecraft:")) {
+            q = q.substring("minecraft:".length());
+        }
+        List<String> ids = new ArrayList<>();
+        List<DropItem> items = new ArrayList<>();
+        for (ResourceLocation rl : blockIds()) {
+            if (items.size() >= 2000) {
+                break;
+            }
+            Block block = BuiltInRegistries.BLOCK.get(rl);
+            if (block.defaultBlockState().isAir()) {
+                continue;
+            }
+            String id = rl.toString();
+            String name = block.getName().getString();
+            if (!q.isEmpty() && !id.contains(q) && !name.toLowerCase(Locale.ROOT).contains(q)) {
+                continue;
+            }
+            ids.add(id);
+            String shown = rl.getNamespace().equals("minecraft") ? rl.getPath() : id;
+            items.add(new DropItem(Component.literal(name + "  \u00B7 " + shown), -1, 0, id.equals(current)));
+        }
+        if (items.isEmpty()) {
+            warn(Ui.tr("field.block_no_match", filter.trim()));
+            return;
+        }
+        dropdown = new Dropdown(ax, ay, aw, ah, items, i -> onPick.accept(ids.get(i)));
+        setFocused(null);
+    }
+
+    // ---------------------------------------------------------------------------------------
     // Habilidades
     // ---------------------------------------------------------------------------------------
 
@@ -1974,6 +2297,19 @@ public class EditorScreen extends Screen {
                         v -> a.explodeCooldown = Math.round(v), 1f, 120f, 1f, true);
             }
             y = text(y, Ui.tr("ability.explode.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+        y = abilityRow(y, Items.TNT, "ability.last_blast", () -> a.lastBlast, v -> a.lastBlast = v);
+        if (a.lastBlast) {
+            indent(SUB);
+            y = numField(y, "ability.last_blast.hearts", () -> a.lastBlastHearts, v -> a.lastBlastHearts = v,
+                    0f, 512f, 0.5f, false);
+            y = smallLabel(y, Ui.tr("ability.explode.size"));
+            y = chips(y, BLAST_SIZES, 3, () -> a.lastBlastSize, v -> a.lastBlastSize = v,
+                    v -> Ui.tr("explode." + v.key()), null) + 4;
+            y = numField(y, "ability.explode.fuse", () -> (float) a.lastBlastFuse, v -> a.lastBlastFuse = Math.round(v),
+                    0f, 200f, 5f, true);
+            y = text(y, Ui.tr("ability.last_blast.hint"), HINT) + 4;
             indent(-SUB);
         }
 
@@ -2061,6 +2397,12 @@ public class EditorScreen extends Screen {
         // Arana
         y = abilityRow(y, Items.SPIDER_SPAWN_EGG, "ability.climb", () -> a.climb, v -> a.climb = v);
         y = abilityRow(y, Items.SPIDER_SPAWN_EGG, "ability.leap", () -> a.leap, v -> a.leap = v);
+        y = abilityRow(y, Items.SPIDER_SPAWN_EGG, "ability.night", () -> a.nightHostile, v -> a.nightHostile = v);
+        if (a.nightHostile) {
+            indent(SUB);
+            y = text(y, Ui.tr("ability.night.hint"), HINT) + 4;
+            indent(-SUB);
+        }
 
         // Golem de hierro
         y = abilityRow(y, Items.IRON_GOLEM_SPAWN_EGG, "ability.launch", () -> a.launch, v -> a.launch = v);
@@ -2078,6 +2420,29 @@ public class EditorScreen extends Screen {
             y = numField(y, "ability.cooldown_s", () -> (float) a.selfHealCooldown,
                     v -> a.selfHealCooldown = Math.round(v), 1f, 600f, 1f, true);
             y = text(y, Ui.tr("ability.heal.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+
+        // Roba vida y come para curarse
+        y = abilityRow(y, Items.WITHER_SPAWN_EGG, "ability.life_steal", () -> a.lifeSteal, v -> a.lifeSteal = v);
+        if (a.lifeSteal) {
+            indent(SUB);
+            y = numField(y, "ability.life_steal.percent", () -> (float) a.lifeStealPercent,
+                    v -> a.lifeStealPercent = Math.round(v), 1f, 200f, 5f, true);
+            y = text(y, Ui.tr("ability.life_steal.hint"), HINT) + 4;
+            indent(-SUB);
+        }
+        y = abilityRow(y, Items.PANDA_SPAWN_EGG, "ability.eat", () -> a.eat, v -> a.eat = v);
+        if (a.eat) {
+            indent(SUB);
+            y = numField(y, "ability.eat.hearts", () -> a.eatHearts, v -> a.eatHearts = v, 0.5f, 512f, 0.5f, false);
+            y = smallLabel(y, Ui.tr("ability.eat.item"));
+            itemField(0, y, contentW, () -> a.eatItem, v -> a.eatItem = v);
+            y += ROW;
+            y = numField(y, "ability.eat.count", () -> (float) a.eatCount, v -> a.eatCount = Math.round(v),
+                    0f, 64f, 1f, true);
+            y = toggleRow(y, "ability.eat.ground", () -> a.eatGround, v -> a.eatGround = v, "ability.eat.ground_tip");
+            y = text(y, Ui.tr("ability.eat.hint"), HINT) + 4;
             indent(-SUB);
         }
 
@@ -5312,6 +5677,65 @@ public class EditorScreen extends Screen {
     }
 
     /** Colores rapidos. */
+    /** Pintar toda la criatura: sus colores principales (como estan ahora); el marcado es el que se cambia. */
+    private final class ColorChoices extends Element {
+        private static final int SIZE = 16;
+        private static final int STEP = SIZE + 3;
+        private final int perRow;
+
+        ColorChoices(int x, int y, int w) {
+            super(x, y, w, 0);
+            this.perRow = Math.max(1, (w + 3) / STEP);
+            this.h = Math.max(1, (recolorColors.length + perRow - 1) / perRow) * STEP - 3;
+        }
+
+        private int indexAt(double mx, double my) {
+            for (int i = 0; i < recolorColors.length; i++) {
+                if (Ui.inside(mx, my, left() + (i % perRow) * STEP, top() + (i / perRow) * STEP, SIZE, SIZE)) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        /** El color de esa familia tal y como se ve ahora (con el cambio que se esta probando). */
+        private int shown(int i) {
+            int c = recolorColors[i];
+            return recolorFrom < 0 ? c : Recolor.map(c, recolorFrom, recolorTo, recolorOnly);
+        }
+
+        @Override
+        void render(GuiGraphics g, int mx, int my) {
+            int hovered = indexAt(mx, my);
+            for (int i = 0; i < recolorColors.length; i++) {
+                int x0 = left() + (i % perRow) * STEP;
+                int y0 = top() + (i / perRow) * STEP;
+                boolean chosen = recolorColors[i] == recolorFrom;
+                if (chosen) {
+                    g.fill(x0 - 2, y0 - 2, x0 + SIZE + 2, y0 + SIZE + 2, Ui.ACCENT);
+                }
+                Ui.swatch(g, x0, y0, SIZE, shown(i), chosen || i == hovered);
+            }
+        }
+
+        @Override
+        boolean click(double mx, double my, int button) {
+            int i = indexAt(mx, my);
+            if (i < 0) {
+                return false;
+            }
+            chooseRecolor(i);
+            playClick();
+            return true;
+        }
+
+        @Override
+        List<FormattedCharSequence> tooltip(double mx, double my) {
+            int i = indexAt(mx, my);
+            return i < 0 ? null : tip(Ui.tr("recolor.pick_tip", CreatureJson.hex(shown(i))));
+        }
+    }
+
     private final class Palette extends Element {
         private final IntSupplier getter;
         private final IntConsumer setter;
@@ -5694,22 +6118,33 @@ public class EditorScreen extends Screen {
     /** Icono del item escrito en el campo de al lado. */
     private final class ItemIcon extends Element {
         private final Supplier<String> id;
+        private final Function<String, ItemStack> resolver;
         @Nullable
         private String cachedId;
         private ItemStack cached = ItemStack.EMPTY;
 
         ItemIcon(int x, int y, Supplier<String> id) {
+            this(x, y, id, EditorScreen::resolveItem);
+        }
+
+        /** Con otro modo de buscar el icono (los bloques, con "#" para las etiquetas). */
+        ItemIcon(int x, int y, Supplier<String> id, Function<String, ItemStack> resolver) {
             super(x, y, FIELD_H, FIELD_H);
             this.id = id;
+            this.resolver = resolver;
         }
 
         private ItemStack stack() {
             String s = id.get();
             if (!s.equals(cachedId)) {
                 cachedId = s;
-                cached = resolveItem(s);
+                cached = resolver.apply(s);
             }
             return cached;
+        }
+
+        private boolean tag() {
+            return id.get().trim().startsWith("#");
         }
 
         @Override
@@ -5721,6 +6156,8 @@ public class EditorScreen extends Screen {
             ItemStack stack = stack();
             if (!stack.isEmpty()) {
                 g.renderItem(stack, l, t);
+            } else if (tag()) {
+                g.drawCenteredString(font, "#", l + w / 2, t + 4, Ui.ACCENT);
             } else if (!id.get().isBlank()) {
                 g.drawCenteredString(font, "?", l + w / 2, t + 4, Ui.ERROR);
             }
@@ -5728,6 +6165,9 @@ public class EditorScreen extends Screen {
 
         @Override
         List<FormattedCharSequence> tooltip(double mx, double my) {
+            if (tag()) {
+                return tip(Ui.tr("field.block_tag", id.get().trim()));
+            }
             ItemStack stack = stack();
             if (!stack.isEmpty()) {
                 return tip(stack.getHoverName());

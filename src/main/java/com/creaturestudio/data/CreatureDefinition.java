@@ -117,6 +117,20 @@ public class CreatureDefinition {
     public boolean seeThroughWalls = false;
     public float wallRange = 24f;
 
+    // --- Romper bloques (los que le cierran el paso hasta quien ataca) ---
+    public static final int MAX_BREAK_BLOCKS = 32;
+    public boolean breakBlocks = false;
+    /** true = cualquier bloque (menos los irrompibles, como la roca madre); false = solo los de la lista. */
+    public boolean breakAll = true;
+    /** Bloques que puede romper: ids ("minecraft:dirt") o etiquetas de bloques ("#minecraft:logs"). */
+    public List<String> breakList = new ArrayList<>();
+    /** Segundos que tarda en romper un bloque como la piedra (0 = al instante). */
+    public float breakTime = 2f;
+    /** Los bloques duros (obsidiana) tardan mas y los blandos (tierra) menos. */
+    public boolean breakByHardness = true;
+    /** Cuantos bloques rompe de un golpe. */
+    public int breakCount = 1;
+
     // --- Otros ---
     public boolean canDrown = true;
     public boolean noFallDamage = false;
@@ -343,6 +357,9 @@ public class CreatureDefinition {
         combatRegen = clamp(combatRegen, 0f, 100f);
         visionRange = clamp(visionRange, 1f, 128f);
         wallRange = clamp(wallRange, 1f, 128f);
+        breakList = BreakPlan.cleanList(breakList, MAX_BREAK_BLOCKS);
+        breakTime = clamp(breakTime, 0f, BreakPlan.MAX_SECONDS);
+        breakCount = clampInt(breakCount, 1, BreakPlan.MAX_COUNT);
 
         equipHead = cleanResource(equipHead);
         equipChest = cleanResource(equipChest);

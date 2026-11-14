@@ -83,7 +83,9 @@ class CreatureSonicBoomGoal extends Goal {
             level.sendParticles(ParticleTypes.SONIC_BOOM, p.x, p.y, p.z, 1, 0.0, 0.0, 0.0, 0.0);
         }
         mob.playSoundId("entity.warden.sonic_boom", 3.0f, 1.0f);
+        float before = CustomCreature.lifeOf(t);
         if (t.hurt(mob.damageSources().sonicBoom(mob), d.abilities.sonicDamage)) {
+            mob.stealLife(t, before);
             double resist = 1.0 - t.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE);
             t.push(dir.x * 2.5 * resist, dir.y * 0.5 * resist, dir.z * 2.5 * resist);
             t.hurtMarked = true;

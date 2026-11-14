@@ -306,7 +306,11 @@ public class CreatureProjectile extends Projectile {
         Entity owner = this.getOwner();
         DamageSource source = this.damageSources().mobProjectile(this, owner instanceof LivingEntity l ? l : null);
         // Si lo para (escudo, invulnerable...) no hay empuje ni efecto, como con las flechas
+        float before = target instanceof LivingEntity l ? CustomCreature.lifeOf(l) : 0f;
         boolean hit = this.damage <= 0f || target.hurt(source, this.damage);
+        if (hit && owner instanceof CustomCreature shooter && target instanceof LivingEntity victim) {
+            shooter.stealLife(victim, before); // roba vida tambien con los proyectiles
+        }
         if (hit && target instanceof LivingEntity living && living.isAlive()) {
             if (this.knockback > 0f) {
                 Vec3 dir = this.getDeltaMovement().multiply(1.0, 0.0, 1.0);

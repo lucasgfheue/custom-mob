@@ -78,7 +78,10 @@ class CreatureBeamGoal extends Goal {
         mob.getLookControl().setLookAt(t, 90.0f, 90.0f);
         if (++ticks >= d.abilities.beamCharge) {
             fired = true;
-            t.hurt(mob.damageSources().indirectMagic(mob, mob), d.abilities.beamDamage);
+            float before = CustomCreature.lifeOf(t);
+            if (t.hurt(mob.damageSources().indirectMagic(mob, mob), d.abilities.beamDamage)) {
+                mob.stealLife(t, before);
+            }
         }
     }
 }

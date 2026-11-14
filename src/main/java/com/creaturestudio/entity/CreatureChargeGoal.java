@@ -90,7 +90,9 @@ class CreatureChargeGoal extends Goal {
         }
         if (mob.getBoundingBox().inflate(0.4).intersects(t.getBoundingBox())) {
             hit = true;
+            float before = CustomCreature.lifeOf(t);
             if (t.hurt(mob.damageSources().mobAttack(mob), d.abilities.chargeDamage)) {
+                mob.stealLife(t, before);
                 t.knockback(1.6, -dir.x, -dir.z);
                 t.hurtMarked = true;
             }

@@ -122,6 +122,19 @@ public final class CreatureJson {
         vision.addProperty("wallRange", d.wallRange);
         o.add("vision", vision);
 
+        JsonObject breaking = new JsonObject();
+        breaking.addProperty("on", d.breakBlocks);
+        breaking.addProperty("all", d.breakAll);
+        JsonArray breakList = new JsonArray();
+        for (String b : d.breakList) {
+            breakList.add(b);
+        }
+        breaking.add("blocks", breakList);
+        breaking.addProperty("time", d.breakTime);
+        breaking.addProperty("byHardness", d.breakByHardness);
+        breaking.addProperty("count", d.breakCount);
+        o.add("breakBlocks", breaking);
+
         JsonObject flags = new JsonObject();
         flags.addProperty("canDrown", d.canDrown);
         flags.addProperty("noFallDamage", d.noFallDamage);
@@ -351,6 +364,23 @@ public final class CreatureJson {
             d.wallRange = num(vision, "wallRange", d.wallRange);
         } else {
             d.visionRange = d.followRange; // antes la vision era el rango de seguimiento
+        }
+
+        JsonObject breaking = obj(o, "breakBlocks");
+        if (breaking != null) {
+            d.breakBlocks = bool(breaking, "on", false);
+            d.breakAll = bool(breaking, "all", true);
+            d.breakList = new java.util.ArrayList<>();
+            if (breaking.has("blocks") && breaking.get("blocks").isJsonArray()) {
+                for (JsonElement e : breaking.getAsJsonArray("blocks")) {
+                    if (e.isJsonPrimitive() && d.breakList.size() < CreatureDefinition.MAX_BREAK_BLOCKS) {
+                        d.breakList.add(e.getAsString());
+                    }
+                }
+            }
+            d.breakTime = num(breaking, "time", d.breakTime);
+            d.breakByHardness = bool(breaking, "byHardness", true);
+            d.breakCount = integer(breaking, "count", 1);
         }
 
         JsonObject flags = obj(o, "flags");

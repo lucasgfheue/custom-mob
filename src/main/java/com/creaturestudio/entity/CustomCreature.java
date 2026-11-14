@@ -1,5 +1,6 @@
 package com.creaturestudio.entity;
 
+import com.creaturestudio.data.Abilities;
 import com.creaturestudio.data.AnimAction;
 import com.creaturestudio.data.Ballistics;
 import com.creaturestudio.data.Behavior;
@@ -7,12 +8,14 @@ import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureDrop;
 import com.creaturestudio.data.CreatureStore;
 import com.creaturestudio.data.DoorMode;
+import com.creaturestudio.data.ExplosionSize;
 import com.creaturestudio.data.Movement;
 import com.creaturestudio.data.RangedType;
 import com.creaturestudio.item.CreatureEggItem;
 import com.creaturestudio.registry.ModRegistry;
 import com.creaturestudio.server.RespawnData;
 import net.minecraft.core.Holder;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -86,6 +89,9 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     /** Guardian: entidad a la que apunta el rayo (0 = ninguna). */
     private static final EntityDataAccessor<Integer> DATA_BEAM_TARGET =
             SynchedEntityData.defineId(CustomCreature.class, EntityDataSerializers.INT);
+    /** Explota con poca vida: se esta hinchando para explotar. */
+    private static final EntityDataAccessor<Boolean> DATA_LAST_BLAST =
+            SynchedEntityData.defineId(CustomCreature.class, EntityDataSerializers.BOOLEAN);
     /** Alcance de golpe de los mobs normales (Mob.DEFAULT_ATTACK_REACH). */
     private static final double VANILLA_REACH = Math.sqrt(2.04) - 0.6;
 
@@ -118,6 +124,11 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     private boolean exploded;
     private int swell;
     private int oldSwell;
+    /** Explota con poca vida: ticks que lleva hinchandose (en el servidor y en el cliente). */
+    private int lastBlast;
+    private int oldLastBlast;
+    /** Come para curarse: comida que le queda (-1 = sin empezar, la de la definicion). Se guarda en el mundo. */
+    private int foodLeft = -1;
     private int clientBeamTime;
     int explodeCooldown;
     int beamCooldown;
@@ -157,6 +168,7 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         builder.define(DATA_CREATURE_ID, "");
         builder.define(DATA_SWELL_DIR, -1);
         builder.define(DATA_BEAM_TARGET, 0);
+        builder.define(DATA_LAST_BLAST, false);
     }
 
     // ---------------------------------------------------------------------------------------
@@ -199,7 +211,18 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
 
     private boolean canFight() {
         CreatureDefinition d = def();
-        return behavior() != Behavior.PASSIVE || (d != null && d.abilities.stareAnger);
+        return behavior() != Behavior.PASSIVE || (d != null && (d.abilities.stareAnger || d.abilities.nightHostile));
+    }
+
+    /** Arana: hostil a oscuras (de noche y en las cuevas) y neutral con luz. */
+    private boolean nightHostile() {
+        CreatureDefinition d = def();
+        return d != null && d.abilities.nightHostile;
+    }
+
+    /** A oscuras, con la misma medida que la arana. */
+    private boolean inTheDark() {
+        return this.getLightLevelDependentMagicValue() < 0.5f;
     }
 
     /** Puede atacar ahora (para las habilidades de ataque). */
@@ -371,6 +394,9 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         this.goalSelector.addGoal(1, new ConditionalGoal(new LeapAtTargetGoal(this, 0.4f),
                 () -> canFight() && ability(a -> a.leap)));
         this.goalSelector.addGoal(1, new CreatureFleeGoal(this));
+        // Comer para curarse (para y come) y romper los bloques que le cierran el paso (mientras persigue)
+        this.goalSelector.addGoal(1, new CreatureEatGoal(this));
+        this.goalSelector.addGoal(1, new CreatureBreakBlockGoal(this));
         this.goalSelector.addGoal(4, new ConditionalGoal(new OpenDoorGoal(this, true),
                 () -> doorMode() == DoorMode.OPEN));
         this.goalSelector.addGoal(2, new ConditionalGoal(new CreatureRangedGoal(this),
@@ -387,10 +413,13 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
 
         this.targetSelector.addGoal(1, new ConditionalGoal(new HurtByTargetGoal(this), this::canFight));
+        // (la arana busca a oscuras, pero si ya persigue a alguien no lo suelta de golpe al llegar a la luz)
         this.targetSelector.addGoal(2, new ConditionalGoal(new CreatureTargetGoal(this, false),
-                () -> hostileNow() && !seesThroughWalls() && !blind()));
+                () -> hostileNow() && !seesThroughWalls() && !blind(),
+                () -> mayHunt() && !seesThroughWalls() && !blind()));
         this.targetSelector.addGoal(2, new ConditionalGoal(new CreatureTargetGoal(this, true),
-                () -> hostileNow() && seesThroughWalls() && !blind()));
+                () -> hostileNow() && seesThroughWalls() && !blind(),
+                () -> mayHunt() && seesThroughWalls() && !blind()));
         // Warden: ciega, encuentra a los jugadores por el ruido
         this.targetSelector.addGoal(2, new HearingTargetGoal(this));
     }
@@ -420,7 +449,15 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
     }
 
     boolean hostileNow() {
-        return behavior() == Behavior.HOSTILE && this.level().getDifficulty() != Difficulty.PEACEFUL;
+        if (this.level().getDifficulty() == Difficulty.PEACEFUL) {
+            return false;
+        }
+        return nightHostile() ? inTheDark() : behavior() == Behavior.HOSTILE;
+    }
+
+    /** Puede ir a por jugadores (aunque ahora mismo no los busque, como la arana con luz). */
+    private boolean mayHunt() {
+        return this.level().getDifficulty() != Difficulty.PEACEFUL && (nightHostile() || behavior() == Behavior.HOSTILE);
     }
 
     /** Un atacante a distancia pasa al cuerpo a cuerpo cuando el objetivo se le acerca mucho. */
@@ -507,15 +544,42 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
 
     @Override
     public boolean doHurtTarget(Entity target) {
+        float before = target instanceof LivingEntity l ? lifeOf(l) : 0f;
         boolean hit = super.doHurtTarget(target);
         CreatureDefinition d = def();
         if (hit && d != null) {
             if (target instanceof LivingEntity living) {
                 HitEffects.apply(d.hitEffect, living, this);
+                stealLife(living, before);
             }
             abilities.afterAttack(d, target);
         }
         return hit;
+    }
+
+    /** Vida que le queda a alguien (con los corazones amarillos). */
+    static float lifeOf(LivingEntity e) {
+        return Math.max(0f, e.getHealth()) + e.getAbsorptionAmount();
+    }
+
+    /**
+     * Roba vida: se cura una parte del dano que acaba de hacer. {@code before} es la vida de la victima justo antes
+     * del golpe (ver {@link #lifeOf}); vale para todos sus ataques (golpe, proyectil, rayo, grito, embestida).
+     */
+    void stealLife(LivingEntity victim, float before) {
+        CreatureDefinition d = def();
+        if (d == null || !d.abilities.lifeSteal || victim == this || !this.isAlive()) {
+            return;
+        }
+        float dealt = before - lifeOf(victim);
+        if (dealt <= 0f || this.getHealth() >= this.getMaxHealth()) {
+            return;
+        }
+        this.heal(dealt * d.abilities.lifeStealPercent / 100f);
+        if (this.level() instanceof ServerLevel level) {
+            level.sendParticles(ParticleTypes.HEART, this.getX(), this.getEyeY() + 0.3, this.getZ(), 1,
+                    this.getBbWidth() * 0.3, 0.2, this.getBbWidth() * 0.3, 0.0);
+        }
     }
 
     // ---------------------------------------------------------------------------------------
@@ -606,6 +670,7 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         } else {
             this.oldSwell = this.swell;
         }
+        tickLastBlast(before);
         super.tick();
         CreatureDefinition d = def();
         if (this.level().isClientSide()) {
@@ -665,10 +730,22 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
                 updateShield(d);
                 if (this.level() instanceof ServerLevel level) {
                     abilities.serverTick(d, level);
+                    checkLastBlast(level, d);
+                }
+                if (d.abilities.nightHostile) {
+                    calmInTheLight();
                 }
             }
         }
         super.aiStep();
+    }
+
+    /** Arana: con luz deja de perseguir poco a poco a quien no la ha atacado hace poco. */
+    private void calmInTheLight() {
+        LivingEntity t = this.getTarget();
+        if (t != null && t != this.getLastHurtByMob() && !inTheDark() && this.getRandom().nextInt(100) == 0) {
+            this.setTarget(null);
+        }
     }
 
     /** Cada segundo recupera vida: la normal, o la de combate si esta peleando o la han herido hace poco. */
@@ -695,6 +772,12 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         CreatureDefinition d = def();
         if (d == null) {
             return;
+        }
+        if (d.abilities.lastBlast && !this.exploded) {
+            // "o esta por morir": un golpe que la mata tambien la hace explotar
+            this.exploded = true;
+            level.explode(this, this.getX(), this.getY(), this.getZ(), blastPower(d.abilities.lastBlastSize),
+                    Level.ExplosionInteraction.MOB);
         }
         if (d.abilities.split && !this.exploded && this.generation < d.abilities.splitGenerations) {
             splitInto(level, d);
@@ -816,11 +899,75 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         this.entityData.set(DATA_SWELL_DIR, dir);
     }
 
-    /** Creeper: cuanto se ha hinchado (0 a 1) para el dibujado. */
+    /** Creeper: cuanto se ha hinchado (0 a 1) para el dibujado (tambien al explotar con poca vida). */
     public float getSwelling(float partialTick) {
         CreatureDefinition d = def();
         int fuse = d == null ? 30 : d.abilities.explodeFuse;
-        return Mth.lerp(partialTick, (float) this.oldSwell, (float) this.swell) / Math.max(1, fuse - 2);
+        float creeper = Mth.lerp(partialTick, (float) this.oldSwell, (float) this.swell) / Math.max(1, fuse - 2);
+        if (d != null && this.entityData.get(DATA_LAST_BLAST)) {
+            float last = Mth.lerp(partialTick, (float) this.oldLastBlast, (float) this.lastBlast)
+                    / Math.max(1, d.abilities.lastBlastFuse - 2);
+            return Math.max(creeper, last);
+        }
+        return creeper;
+    }
+
+    /** Explota con poca vida: empieza a hincharse cuando le quedan esos corazones (o explota ya, sin mecha). */
+    private void checkLastBlast(ServerLevel level, CreatureDefinition d) {
+        Abilities a = d.abilities;
+        if (!a.lastBlast || this.exploded || a.lastBlastHearts <= 0f || this.entityData.get(DATA_LAST_BLAST)
+                || this.getHealth() > a.lastBlastHearts * 2f) {
+            return;
+        }
+        if (a.lastBlastFuse <= 0) {
+            lastBlastNow(level, d);
+            return;
+        }
+        this.entityData.set(DATA_LAST_BLAST, true);
+        this.lastBlast = 0;
+        this.oldLastBlast = 0;
+        playSoundId("entity.creeper.primed", 1.0f, 0.5f);
+    }
+
+    /** La mecha de "explota con poca vida" (en los dos lados; el servidor la hace explotar al acabar). */
+    private void tickLastBlast(@Nullable CreatureDefinition d) {
+        this.oldLastBlast = this.lastBlast;
+        if (d == null || !d.abilities.lastBlast || !this.isAlive() || !this.entityData.get(DATA_LAST_BLAST)) {
+            this.lastBlast = 0;
+            this.oldLastBlast = 0;
+            return;
+        }
+        this.lastBlast++;
+        if (this.lastBlast >= d.abilities.lastBlastFuse && this.level() instanceof ServerLevel level) {
+            lastBlastNow(level, d);
+        }
+    }
+
+    /** Explota y muere (suelta su botin, como si la hubieran matado). */
+    private void lastBlastNow(ServerLevel level, CreatureDefinition d) {
+        if (this.exploded) {
+            return;
+        }
+        this.exploded = true;
+        level.explode(this, this.getX(), this.getY(), this.getZ(), blastPower(d.abilities.lastBlastSize),
+                Level.ExplosionInteraction.MOB);
+        if (this.isAlive()) {
+            this.kill();
+        }
+    }
+
+    /** Come para curarse: cuanta comida le queda encima. */
+    int foodLeft(CreatureDefinition d) {
+        if (this.foodLeft < 0) {
+            this.foodLeft = d.abilities.eatCount;
+        }
+        return this.foodLeft;
+    }
+
+    void useFood() {
+        if (this.foodLeft > 0) {
+            this.foodLeft--;
+        }
     }
 
     private void tickSwell(CreatureDefinition d) {
@@ -842,13 +989,18 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         }
     }
 
-    private void explodeNow(ServerLevel level, CreatureDefinition d) {
-        float power = switch (d.abilities.explodeSize) {
+    /** Potencia de las explosiones de la criatura (la mediana, como un creeper). */
+    static float blastPower(ExplosionSize size) {
+        return switch (size) {
             case SMALL -> 2.0f;
             case BIG -> 5.0f;
-            default -> 3.0f; // como un creeper
+            default -> 3.0f;
         };
-        level.explode(this, this.getX(), this.getY(), this.getZ(), power, Level.ExplosionInteraction.MOB);
+    }
+
+    private void explodeNow(ServerLevel level, CreatureDefinition d) {
+        level.explode(this, this.getX(), this.getY(), this.getZ(), blastPower(d.abilities.explodeSize),
+                Level.ExplosionInteraction.MOB);
         if (d.abilities.explodeDies) {
             this.exploded = true;
             scheduleRespawn(level, d);
@@ -1070,6 +1222,9 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         if (abilities.layTimer >= 0) {
             tag.putInt("LayTime", abilities.layTimer);
         }
+        if (this.foodLeft >= 0) {
+            tag.putInt("FoodLeft", this.foodLeft);
+        }
     }
 
     @Override
@@ -1082,6 +1237,7 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
         this.generation = Math.max(0, Math.min(3, tag.getInt("Generation")));
         this.summoned = tag.getBoolean("Summoned");
         abilities.layTimer = tag.contains("LayTime") ? tag.getInt("LayTime") : -1;
+        this.foodLeft = tag.contains("FoodLeft") ? tag.getInt("FoodLeft") : -1;
         if (tag.contains("CreatureId")) {
             this.entityData.set(DATA_CREATURE_ID, tag.getString("CreatureId"));
             if (!this.level().isClientSide()) {
