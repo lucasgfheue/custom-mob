@@ -293,10 +293,9 @@ public class CreatureProjectile extends Projectile {
         if (!super.canHitEntity(target)) {
             return false;
         }
-        // No dispara a los de su misma especie (para que un grupo no se mate entre si)
+        // No le da a los de su misma especie ni a sus aliados (para que un grupo no se mate entre si)
         Entity owner = this.getOwner();
-        return !(owner instanceof CustomCreature shooter && target instanceof CustomCreature other
-                && shooter.getCreatureId().equals(other.getCreatureId()));
+        return !(owner instanceof CustomCreature shooter && shooter.isAllyOf(target));
     }
 
     @Override

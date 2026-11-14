@@ -9,6 +9,7 @@ import com.creaturestudio.data.CreatureDrop;
 import com.creaturestudio.data.CreatureStore;
 import com.creaturestudio.data.DoorMode;
 import com.creaturestudio.data.ExplosionSize;
+import com.creaturestudio.data.Factions;
 import com.creaturestudio.data.Movement;
 import com.creaturestudio.data.RangedType;
 import com.creaturestudio.item.CreatureEggItem;
@@ -17,6 +18,7 @@ import com.creaturestudio.server.RespawnData;
 import net.minecraft.core.Holder;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -26,6 +28,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.tags.DamageTypeTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.InteractionHand;
@@ -60,7 +63,13 @@ import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.navigation.FlyingPathNavigation;
 import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
 import net.minecraft.world.entity.ai.navigation.WallClimberNavigation;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.animal.IronGolem;
+import net.minecraft.world.entity.animal.SnowGolem;
+import net.minecraft.world.entity.animal.WaterAnimal;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.RangedAttackMob;
+import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.projectile.ProjectileDeflection;
@@ -211,7 +220,115 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
 
     private boolean canFight() {
         CreatureDefinition d = def();
-        return behavior() != Behavior.PASSIVE || (d != null && (d.abilities.stareAnger || d.abilities.nightHostile));
+        return behavior() != Behavior.PASSIVE
+                || (d != null && (d.abilities.stareAnger || d.abilities.nightHostile || d.fightsForFaction()));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Facciones
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * Facciones: no la ataca nunca. Son aliadas las de su misma especie, las de su faccion y las de su lista de
+     * aliados (tambien para no devolver un golpe sin querer).
+     */
+    boolean isAllyOf(@Nullable Entity other) {
+        if (other == this) {
+            return true;
+        }
+        if (!(other instanceof LivingEntity e)) {
+            return false;
+        }
+        CreatureDefinition d = def();
+        if (d == null) {
+            return false;
+        }
+        if (e instanceof CustomCreature c) {
+            if (!getCreatureId().isEmpty() && getCreatureId().equals(c.getCreatureId())) {
+                return true;
+            }
+            CreatureDefinition od = c.def();
+            if (od != null && Factions.sameFaction(d.faction, od.faction)) {
+                return true;
+            }
+        }
+        return !d.allies.isEmpty() && Factions.matchesAny(d.allies, subject(e));
+    }
+
+    /** Facciones: lo ataca nada mas verlo (esta en "A quien ataca" y no es aliado). */
+    boolean isEnemy(LivingEntity e) {
+        CreatureDefinition d = def();
+        return d != null && !d.enemies.isEmpty() && e != this && e.isAlive() && !isAllyOf(e)
+                && Factions.matchesAny(d.enemies, subject(e));
+    }
+
+    private boolean hasEnemies() {
+        CreatureDefinition d = def();
+        return d != null && !d.enemies.isEmpty();
+    }
+
+    /** Cuenta como monstruo (para el grupo "Monstruos" de otras criaturas). */
+    private boolean monsterLike() {
+        CreatureDefinition d = def();
+        return d != null && (d.behavior == Behavior.HOSTILE || d.abilities.nightHostile);
+    }
+
+    /** Cuenta como animal (para el grupo "Animales" de otras criaturas). */
+    private boolean animalLike() {
+        CreatureDefinition d = def();
+        return d != null && d.behavior == Behavior.PASSIVE && !monsterLike();
+    }
+
+    /** Lo que miran las listas de facciones de una entidad: su tipo, sus etiquetas, sus grupos y su faccion. */
+    static Factions.Subject subject(LivingEntity e) {
+        return new Factions.Subject() {
+            @Override
+            public String type() {
+                return BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString();
+            }
+
+            @Override
+            public boolean inTag(String tag) {
+                ResourceLocation rl = ResourceLocation.tryParse(tag);
+                return rl != null && e.getType().is(TagKey.create(Registries.ENTITY_TYPE, rl));
+            }
+
+            @Override
+            public boolean inGroup(String group) {
+                return switch (group) {
+                    case "@monsters" -> e instanceof Enemy || (e instanceof CustomCreature c && c.monsterLike());
+                    case "@animals" -> e instanceof Animal || e instanceof WaterAnimal
+                            || (e instanceof CustomCreature c && c.animalLike());
+                    case "@villagers" -> e instanceof AbstractVillager;
+                    case "@golems" -> e instanceof IronGolem || e instanceof SnowGolem;
+                    case "@creatures" -> e instanceof CustomCreature;
+                    case "@all" -> e instanceof Mob || e instanceof Player;
+                    default -> false;
+                };
+            }
+
+            @Override
+            public String creatureId() {
+                return e instanceof CustomCreature c ? c.getCreatureId() : "";
+            }
+
+            @Override
+            public String faction() {
+                CreatureDefinition d = e instanceof CustomCreature c ? c.def() : null;
+                return d == null ? "" : d.faction;
+            }
+        };
+    }
+
+    /** A sus aliados no los ataca (ni los busca ni les devuelve el golpe). */
+    @Override
+    public boolean isAlliedTo(Entity other) {
+        return super.isAlliedTo(other) || (other != this && isAllyOf(other));
+    }
+
+    @Override
+    public boolean canAttack(LivingEntity target) {
+        return !isAllyOf(target) && super.canAttack(target);
     }
 
     /** Arana: hostil a oscuras (de noche y en las cuevas) y neutral con luz. */
@@ -422,6 +539,12 @@ public class CustomCreature extends PathfinderMob implements RangedAttackMob {
                 () -> mayHunt() && seesThroughWalls() && !blind()));
         // Warden: ciega, encuentra a los jugadores por el ruido
         this.targetSelector.addGoal(2, new HearingTargetGoal(this));
+        // Facciones: defiende a sus aliados y ataca a sus enemigos nada mas verlos
+        this.targetSelector.addGoal(1, new DefendAlliesGoal(this));
+        this.targetSelector.addGoal(2, new ConditionalGoal(new FactionTargetGoal(this, false),
+                () -> hasEnemies() && !seesThroughWalls() && !blind()));
+        this.targetSelector.addGoal(2, new ConditionalGoal(new FactionTargetGoal(this, true),
+                () -> hasEnemies() && seesThroughWalls() && !blind()));
     }
 
     private boolean ability(java.util.function.Predicate<com.creaturestudio.data.Abilities> test) {

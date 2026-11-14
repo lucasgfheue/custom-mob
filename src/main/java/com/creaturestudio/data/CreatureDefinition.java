@@ -131,6 +131,16 @@ public class CreatureDefinition {
     /** Cuantos bloques rompe de un golpe. */
     public int breakCount = 1;
 
+    // --- Facciones (pestana Facciones) ---
+    /** Nombre de su faccion ("" = ninguna): las de la misma faccion son aliadas (no se atacan y se ayudan). */
+    public String faction = "";
+    /** A quien ataca nada mas verlo (ver {@link Factions} para lo que puede llevar cada entrada). */
+    public List<String> enemies = new ArrayList<>();
+    /** A quien no ataca nunca, aunque le pegue. */
+    public List<String> allies = new ArrayList<>();
+    /** Va a por quien ataque a un aliado o a una de su faccion. */
+    public boolean defendAllies = true;
+
     // --- Otros ---
     public boolean canDrown = true;
     public boolean noFallDamage = false;
@@ -194,6 +204,11 @@ public class CreatureDefinition {
 
     public boolean isHostile() {
         return behavior == Behavior.HOSTILE;
+    }
+
+    /** Pelea por su faccion: tiene enemigos o defiende a aliados (aunque sea pasiva). */
+    public boolean fightsForFaction() {
+        return !enemies.isEmpty() || (defendAllies && (!faction.isEmpty() || !allies.isEmpty()));
     }
 
     /**
@@ -358,6 +373,9 @@ public class CreatureDefinition {
         visionRange = clamp(visionRange, 1f, 128f);
         wallRange = clamp(wallRange, 1f, 128f);
         breakList = BreakPlan.cleanList(breakList, MAX_BREAK_BLOCKS);
+        faction = Factions.cleanName(faction);
+        enemies = Factions.cleanList(enemies, Factions.MAX_LIST);
+        allies = Factions.cleanList(allies, Factions.MAX_LIST);
         breakTime = clamp(breakTime, 0f, BreakPlan.MAX_SECONDS);
         breakCount = clampInt(breakCount, 1, BreakPlan.MAX_COUNT);
 

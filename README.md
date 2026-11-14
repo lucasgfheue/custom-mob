@@ -25,6 +25,7 @@ fila de **pestañas con iconos** (pasa el ratón por encima para ver su nombre; 
 | **Inventario** | Lo que lleva puesto: casco, pechera, pantalones, botas, mano derecha, mano izquierda, escudo (lo sube al acercarse el enemigo) y proyectil, con la probabilidad de soltarlo; y el **botín al morir**: hasta 10 objetos distintos, cada uno con su cantidad y su probabilidad. Cada hueco tiene un buscador con todos los objetos del juego. |
 | **Conducta** | Pasiva, neutral u hostil; camina o vuela; 27 sonidos; ítem que la atrae. |
 | **Habilidades** | Poderes de los mobs de Minecraft, cada uno con sus ajustes: creeper (explota si te acercas: pequeña, mediana o grande), warden (no ve pero oye; grito sónico), enderman (se teletransporta; se enoja si lo miras), guardián (rayo; espinas), guardián anciano (aura con efecto), slime (se divide), araña (trepa paredes; salta; neutral de día y hostil de noche), gólem de hierro (lanza por los aires), bruja (se cura), invocador (invoca ayudantes), devastador (embestida), lobo (manada), calamar (tinta), breeze (rebota proyectiles), gallina (cae despacio; pone huevos), vaca (se ordeña), zombi/aldeano (abre o rompe puertas), gólem de nieve (deja rastro), calamar luminoso (brilla), zorro (recoge objetos), miedo a otro mob, **explota con poca vida** (con los corazones que elijas, o al morir), **roba vida** al atacar y **come para curarse** (la comida que lleva o la que encuentra en el suelo). |
+| **Facciones** | Con quién se lleva bien y con quién no. **Su facción** (un nombre, p. ej. «Orcos»: las de la misma facción no se atacan, sus proyectiles no se dan y se defienden), **a quién ataca** nada más verlo y **a quién no ataca nunca** (aunque le peguen). Cada lista admite cualquier entidad del juego (con buscador), tus otras criaturas, facciones enteras y grupos rápidos: jugadores, monstruos, animales, aldeanos, gólems, no muertos, saqueadores, criaturas del mod o todos. Opción **Defiende a sus aliados** (va a por quien les ataque, también a un jugador aliado). |
 | **Aparición** | Aparición natural (horario, biomas, probabilidad) y **dónde aparece**: en la superficie, bajo tierra, en el agua o en el cielo, o solo dentro de **estructuras** (aldeas, puestos de saqueadores, mansiones, templos, cabañas de bruja, iglús, ruinas, portales en ruinas, minas, fortalezas, cámaras de desafío, ciudades antiguas, monumentos, barcos hundidos, fortalezas del Nether, bastiones, ciudades del End y estructuras de otros mods por su id). También los colores del huevo. |
 
 **Modo fácil** (botón «Modo fácil» arriba): deja solo las pestañas **Cuerpo**, **Plantillas** y **Pintar**, para
@@ -57,7 +58,7 @@ montar una criatura pieza a pieza sin tocar números. Pulsa otra vez para volver
 4. Ve a la pestaña **Actions**. La compilación empieza sola (o pulsa **Run workflow**). Tarda unos 5–10 minutos
    la primera vez porque descarga y prepara Minecraft.
 5. Cuando aparezca el círculo verde ✔, entra en la ejecución y descarga el artefacto
-   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.8.0.jar`.
+   **CreatureStudio-NeoForge-1.21.1**. Dentro está el archivo `creaturestudio-neoforge-1.21.1-1.9.0.jar`.
 
 Para compilar en tu PC: instala Java 21 y ejecuta `gradlew build` (Windows) o `./gradlew build` (Linux/Mac).
 El `.jar` queda en `build/libs/`.
@@ -93,6 +94,10 @@ El `.jar` queda en `build/libs/`.
   **Todos** o **Solo estos** (añade bloques o pulsa un grupo rápido), los **segundos por bloque** y los
   **bloques de un golpe**. Los rompe cuando algo no la deja llegar a quien ataca (tiene que ser neutral u hostil)
   y necesita la regla `mobGriefing`.
+- **Facciones**: pestaña **Facciones** (la bandera roja). Ponle un nombre de facción a varias criaturas para que
+  sean del mismo bando. En **A quién ataca** añade entidades (escribe y pulsa ▾ para buscar, o usa un grupo rápido)
+  o la facción enemiga; en **A quién no ataca nunca**, por ejemplo, **Jugadores** para que no te ataque. Las de la
+  misma especie nunca se atacan entre ellas.
 - **Cambiar el color de toda la criatura**: pestaña **Pintar** → **Pintar toda la criatura** → elige el color que
   quieres cambiar y el color nuevo. Ctrl+Z lo deshace.
 - **Montar un cuerpo rápido**: pestaña **Cuerpo** (o activa el **Modo fácil**) → pulsa *Cuerpo 2 patas*,

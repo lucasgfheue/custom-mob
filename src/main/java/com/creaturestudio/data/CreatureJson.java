@@ -135,6 +135,21 @@ public final class CreatureJson {
         breaking.addProperty("count", d.breakCount);
         o.add("breakBlocks", breaking);
 
+        JsonObject factions = new JsonObject();
+        factions.addProperty("name", d.faction);
+        JsonArray enemies = new JsonArray();
+        for (String e : d.enemies) {
+            enemies.add(e);
+        }
+        factions.add("enemies", enemies);
+        JsonArray allies = new JsonArray();
+        for (String e : d.allies) {
+            allies.add(e);
+        }
+        factions.add("allies", allies);
+        factions.addProperty("defend", d.defendAllies);
+        o.add("factions", factions);
+
         JsonObject flags = new JsonObject();
         flags.addProperty("canDrown", d.canDrown);
         flags.addProperty("noFallDamage", d.noFallDamage);
@@ -383,6 +398,14 @@ public final class CreatureJson {
             d.breakCount = integer(breaking, "count", 1);
         }
 
+        JsonObject factions = obj(o, "factions");
+        if (factions != null) {
+            d.faction = str(factions, "name", "");
+            d.enemies = strings(factions, "enemies", Factions.MAX_LIST);
+            d.allies = strings(factions, "allies", Factions.MAX_LIST);
+            d.defendAllies = bool(factions, "defend", true);
+        }
+
         JsonObject flags = obj(o, "flags");
         if (flags != null) {
             d.canDrown = bool(flags, "canDrown", true);
@@ -627,6 +650,19 @@ public final class CreatureJson {
 
     private static JsonObject obj(JsonObject o, String key) {
         return o.has(key) && o.get(key).isJsonObject() ? o.getAsJsonObject(key) : null;
+    }
+
+    /** Lista de textos (los que no son texto se saltan), como mucho max. */
+    private static java.util.List<String> strings(JsonObject o, String key, int max) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (o.has(key) && o.get(key).isJsonArray()) {
+            for (JsonElement e : o.getAsJsonArray(key)) {
+                if (e.isJsonPrimitive() && out.size() < max) {
+                    out.add(e.getAsString());
+                }
+            }
+        }
+        return out;
     }
 
     private static String str(JsonObject o, String key, String def) {

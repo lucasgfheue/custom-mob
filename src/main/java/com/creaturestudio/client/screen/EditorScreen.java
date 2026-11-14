@@ -28,6 +28,8 @@ import com.creaturestudio.data.BodyParts;
 import com.creaturestudio.data.CreatureDefinition;
 import com.creaturestudio.data.CreatureJson;
 import com.creaturestudio.data.CreatureStore;
+import com.creaturestudio.data.Factions;
+import com.creaturestudio.item.CreatureEggItem;
 import com.creaturestudio.data.CreaturePart;
 import com.creaturestudio.data.DefCodec;
 import com.creaturestudio.data.HitEffect;
@@ -68,6 +70,8 @@ import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.SpawnEggItem;
+import net.minecraft.world.entity.ai.attributes.DefaultAttributes;
 import net.minecraft.world.level.block.Block;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
@@ -111,6 +115,7 @@ public class EditorScreen extends Screen {
         INVENTORY("inventory"),
         BEHAVIOR("behavior"),
         ABILITIES("abilities"),
+        FACTIONS("factions"),
         SPAWN("spawn");
 
         private final String key;
@@ -147,6 +152,7 @@ public class EditorScreen extends Screen {
                     case INVENTORY -> Items.CHEST;
                     case BEHAVIOR -> Items.IRON_SWORD;
                     case ABILITIES -> Items.NETHER_STAR;
+                    case FACTIONS -> Items.RED_BANNER;
                     case SPAWN -> Items.GRASS_BLOCK;
                 });
             }
@@ -187,7 +193,7 @@ public class EditorScreen extends Screen {
     /** Pestanas que se ven en el modo facil y en el completo, en orden (teclas 1, 2, 3...). */
     private static final Tab[] EASY_TABS = {Tab.EASY, Tab.TEMPLATE, Tab.PAINT};
     private static final Tab[] FULL_TABS = {Tab.TEMPLATE, Tab.EASY, Tab.PARTS, Tab.SHAPE, Tab.PAINT, Tab.ANIMATE,
-            Tab.STATS, Tab.INVENTORY, Tab.BEHAVIOR, Tab.ABILITIES, Tab.SPAWN};
+            Tab.STATS, Tab.INVENTORY, Tab.BEHAVIOR, Tab.ABILITIES, Tab.FACTIONS, Tab.SPAWN};
     /** Opciones Si/No para los grupos de botones. */
     private static final Boolean[] NO_YES = {Boolean.FALSE, Boolean.TRUE};
     private static final Boolean[] YES_NO = {Boolean.TRUE, Boolean.FALSE};
@@ -509,6 +515,7 @@ public class EditorScreen extends Screen {
             case INVENTORY -> buildInventoryTab(y);
             case BEHAVIOR -> buildBehaviorTab(y);
             case ABILITIES -> buildAbilitiesTab(y);
+            case FACTIONS -> buildFactionsTab(y);
             case SPAWN -> buildSpawnTab(y);
         };
         contentHeight = bottom + PAD;
@@ -2065,6 +2072,343 @@ public class EditorScreen extends Screen {
         }
         dropdown = new Dropdown(ax, ay, aw, ah, items, i -> onPick.accept(ids.get(i)));
         setFocused(null);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Facciones
+    // ---------------------------------------------------------------------------------------
+
+    /** Grupos rapidos de las listas de facciones: entrada, nombre del texto e icono. */
+    private static final String[] FACTION_QUICK = {Factions.PLAYER, "@monsters", "@animals", "@villagers", "@golems",
+            "#minecraft:undead", "#minecraft:raiders", "@creatures", "@all"};
+    private static final String[] FACTION_QUICK_KEYS = {"players", "monsters", "animals", "villagers", "golems",
+            "undead", "raiders", "creatures", "all"};
+
+    private static Item factionQuickIcon(int i) {
+        return switch (i) {
+            case 0 -> Items.PLAYER_HEAD;
+            case 1 -> Items.ZOMBIE_HEAD;
+            case 2 -> Items.WHEAT;
+            case 3 -> Items.EMERALD;
+            case 4 -> Items.CARVED_PUMPKIN;
+            case 5 -> Items.SKELETON_SKULL;
+            case 6 -> Items.CROSSBOW;
+            case 7 -> Items.EGG;
+            default -> Items.DIAMOND_SWORD;
+        };
+    }
+
+    private int buildFactionsTab(int y) {
+        y = intro(y);
+        // Su faccion
+        y = section(y, Ui.tr("faction.section"));
+        y = smallLabel(y, Ui.tr("faction.name"));
+        textBox(0, y, contentW, Factions.NAME_MAX, def.faction, v -> {
+            def.faction = v;
+            markChanged();
+        }, Ui.tr("faction.name_hint"));
+        y += ROW;
+        List<String> others = knownFactions(false);
+        if (!others.isEmpty()) {
+            y = smallLabel(y, Ui.tr("faction.join"));
+            int cols = 2;
+            int cw = (contentW - GAP) / cols;
+            for (int i = 0; i < others.size() && i < 6; i++) {
+                String name = others.get(i);
+                int col = i % cols;
+                button(col * (cw + GAP), y, col == cols - 1 ? contentW - cw - GAP : cw, Component.literal(name), b -> {
+                    def.faction = name;
+                    markChanged();
+                    requestRebuild();
+                }, Ui.tr("faction.join_tip", name));
+                if (col == cols - 1 || i == Math.min(others.size(), 6) - 1) {
+                    y += ROW;
+                }
+            }
+        }
+        y = text(y, Ui.tr("faction.name_help"), HINT) + 6;
+
+        // A quien ataca nada mas verlo
+        y = section(y, Ui.tr("faction.enemies"));
+        y = factionList(y, def.enemies);
+        if (def.behavior == Behavior.PASSIVE && !def.enemies.isEmpty()) {
+            y = text(y, Ui.tr("faction.passive_note"), WARN) + 2;
+        }
+        if (def.behavior == Behavior.HOSTILE && !def.allies.contains(Factions.PLAYER)) {
+            y = text(y, Ui.tr("faction.hostile_note"), HINT) + 2;
+        }
+        y = text(y, Ui.tr("faction.enemies_help"), HINT) + 6;
+
+        // A quien no ataca nunca
+        y = section(y, Ui.tr("faction.allies"));
+        y = factionList(y, def.allies);
+        y = toggleRow(y, "faction.defend", () -> def.defendAllies, v -> def.defendAllies = v, "faction.defend_tip");
+        return text(y, Ui.tr("faction.allies_help"), HINT) + 8;
+    }
+
+    /** Facciones que ya tienen las criaturas del mundo (sin repetir), sin la de esta si own es false. */
+    private List<String> knownFactions(boolean own) {
+        List<String> out = new ArrayList<>();
+        for (CreatureDefinition c : CreatureStore.CLIENT.sorted()) {
+            if (c.id.equals(def.id)) {
+                continue;
+            }
+            addFaction(out, c.faction);
+        }
+        if (own) {
+            addFaction(out, Factions.cleanName(def.faction));
+        } else {
+            out.removeIf(f -> Factions.sameFaction(f, def.faction));
+        }
+        out.sort(String.CASE_INSENSITIVE_ORDER);
+        return out;
+    }
+
+    private static void addFaction(List<String> out, String name) {
+        if (name == null || name.isBlank()) {
+            return;
+        }
+        for (String f : out) {
+            if (Factions.sameFaction(f, name)) {
+                return;
+            }
+        }
+        out.add(name.trim());
+    }
+
+    /** Lista de enemigos o de aliados: una fila por entrada (icono, nombre y quitar), una para anadir y los grupos. */
+    private int factionList(int y, List<String> list) {
+        int delW = 16;
+        for (int i = 0; i < list.size(); i++) {
+            int index = i;
+            add(new EntityEntry(0, y, contentW - delW - GAP, () -> index < list.size() ? list.get(index) : ""));
+            button(contentW - delW, y, delW, Component.literal("\u2715"), b -> {
+                if (index < list.size()) {
+                    list.remove(index);
+                    markChanged();
+                    requestRebuild();
+                }
+            }, Ui.tr("faction.remove"));
+            y += ROW;
+        }
+        if (list.isEmpty()) {
+            y = text(y, Ui.tr("faction.empty"), Ui.MUTED) + 2;
+        }
+        if (list.size() < Factions.MAX_LIST) {
+            int pickW = 14;
+            int addW = 16;
+            int boxW = contentW - pickW - addW - GAP * 2;
+            EditBox box = textBox(0, y, boxW, 64, "", v -> {
+            }, Ui.tr("faction.search"));
+            add(new DropButton(boxW + GAP, y, pickW, Component::empty, () -> -1, Ui.tr("faction.pick"),
+                    anchor -> openFactionDropdown(anchor.left() - boxW - GAP, anchor.top(), boxW + GAP + pickW, anchor.h,
+                            box.getValue(), entry -> addFactionEntry(list, entry))));
+            button(contentW - addW, y, addW, Component.literal("+"), b -> {
+                String entry = typedEntity(box.getValue());
+                if (entry.isEmpty()) {
+                    warn(Ui.tr("faction.bad", box.getValue().trim()));
+                    return;
+                }
+                addFactionEntry(list, entry);
+            }, Ui.tr("faction.add_tip"));
+            y += ROW;
+        }
+        y = smallLabel(y, Ui.tr("faction.quick"));
+        int cols = 3;
+        int cw = (contentW - GAP * (cols - 1)) / cols;
+        for (int i = 0; i < FACTION_QUICK.length; i++) {
+            String entry = FACTION_QUICK[i];
+            int col = i % cols;
+            int bw = col == cols - 1 ? contentW - (cw + GAP) * (cols - 1) : cw;
+            button(col * (cw + GAP), y, bw, Ui.tr("faction.group." + FACTION_QUICK_KEYS[i]),
+                    b -> addFactionEntry(list, entry), Ui.tr("faction.group." + FACTION_QUICK_KEYS[i] + ".tip"));
+            if (col == cols - 1 || i == FACTION_QUICK.length - 1) {
+                y += ROW;
+            }
+        }
+        return y + 2;
+    }
+
+    private void addFactionEntry(List<String> list, String raw) {
+        String entry = Factions.cleanEntry(raw);
+        if (entry.isEmpty() || list.size() >= Factions.MAX_LIST) {
+            return;
+        }
+        for (String e : list) {
+            if (e.equalsIgnoreCase(entry)) {
+                warn(Ui.tr("faction.already", entityLabel(entry)));
+                return;
+            }
+        }
+        list.add(entry);
+        markChanged();
+        requestRebuild();
+    }
+
+    /**
+     * Lo escrito en el buscador como entrada: grupos, etiquetas, facciones y criaturas tal cual; una entidad por su id
+     * ("zombie") o por su nombre en el juego ("Zombi"). "" si no hay ninguna asi.
+     */
+    private String typedEntity(String text) {
+        String t = text.trim();
+        if (t.isEmpty()) {
+            return "";
+        }
+        String low = t.toLowerCase(Locale.ROOT);
+        if (low.startsWith("#") || low.startsWith("@") || low.startsWith(Factions.FACTION) || low.startsWith(Factions.CREATURE)) {
+            return Factions.cleanEntry(t);
+        }
+        String id = Factions.cleanEntry(t);
+        if (!id.isEmpty() && entityType(id) != null) {
+            return id;
+        }
+        for (ResourceLocation rl : entityIds()) {
+            if (BuiltInRegistries.ENTITY_TYPE.get(rl).getDescription().getString().equalsIgnoreCase(t)) {
+                return rl.toString();
+            }
+        }
+        for (CreatureDefinition c : CreatureStore.CLIENT.sorted()) {
+            if (c.name.equalsIgnoreCase(t)) {
+                return Factions.CREATURE + c.id;
+            }
+        }
+        return "";
+    }
+
+    @Nullable
+    private static EntityType<?> entityType(String id) {
+        ResourceLocation rl = ResourceLocation.tryParse(id);
+        if (rl == null || !BuiltInRegistries.ENTITY_TYPE.containsKey(rl)) {
+            return null;
+        }
+        return BuiltInRegistries.ENTITY_TYPE.get(rl);
+    }
+
+    @Nullable
+    private static List<ResourceLocation> entityIds;
+
+    /** Tipos de entidad con vida (los que tienen atributos), sin los del propio mod, ordenados. */
+    private static List<ResourceLocation> entityIds() {
+        if (entityIds == null) {
+            List<ResourceLocation> ids = new ArrayList<>();
+            for (ResourceLocation rl : BuiltInRegistries.ENTITY_TYPE.keySet()) {
+                EntityType<?> t = BuiltInRegistries.ENTITY_TYPE.get(rl);
+                if (rl.getNamespace().equals(CreatureStudio.MODID) || !DefaultAttributes.hasSupplier(t)) {
+                    continue;
+                }
+                ids.add(rl);
+            }
+            ids.sort((a, b) -> a.getPath().compareTo(b.getPath()));
+            entityIds = ids;
+        }
+        return entityIds;
+    }
+
+    /** Nombre que se ensena de una entrada de las listas de facciones. */
+    private static Component entityLabel(String entry) {
+        for (int i = 0; i < FACTION_QUICK.length; i++) {
+            if (FACTION_QUICK[i].equals(entry)) {
+                return Ui.tr("faction.group." + FACTION_QUICK_KEYS[i]);
+            }
+        }
+        if (entry.startsWith(Factions.FACTION)) {
+            return Ui.tr("faction.entry.faction", entry.substring(Factions.FACTION.length()));
+        }
+        if (entry.startsWith(Factions.CREATURE)) {
+            String id = entry.substring(Factions.CREATURE.length());
+            CreatureDefinition c = CreatureStore.CLIENT.get(id);
+            return c == null ? Ui.tr("faction.entry.creature_gone", id) : Ui.tr("faction.entry.creature", c.name);
+        }
+        if (entry.startsWith("#")) {
+            return Ui.tr("faction.entry.tag", entry);
+        }
+        EntityType<?> t = entityType(entry);
+        if (t == null) {
+            return Component.literal(entry);
+        }
+        String ns = entry.substring(0, Math.max(0, entry.indexOf(':')));
+        return ns.equals("minecraft") ? t.getDescription()
+                : Component.literal(t.getDescription().getString() + " (" + ns + ")");
+    }
+
+    /** Si la entrada se reconoce (si no, se ensena en rojo: una entidad que no existe o una criatura borrada). */
+    private static boolean entityKnown(String entry) {
+        if (entry.startsWith("#") || entry.startsWith("@") || entry.startsWith(Factions.FACTION)) {
+            return true;
+        }
+        if (entry.startsWith(Factions.CREATURE)) {
+            return CreatureStore.CLIENT.get(entry.substring(Factions.CREATURE.length())) != null;
+        }
+        return entityType(entry) != null;
+    }
+
+    private static ItemStack entityIcon(String entry) {
+        for (int i = 0; i < FACTION_QUICK.length; i++) {
+            if (FACTION_QUICK[i].equals(entry)) {
+                return new ItemStack(factionQuickIcon(i));
+            }
+        }
+        if (entry.startsWith(Factions.FACTION)) {
+            return new ItemStack(Items.WHITE_BANNER);
+        }
+        if (entry.startsWith(Factions.CREATURE)) {
+            String id = entry.substring(Factions.CREATURE.length());
+            return CreatureEggItem.create(id, CreatureStore.CLIENT.get(id));
+        }
+        if (entry.startsWith("#")) {
+            return new ItemStack(Items.NAME_TAG);
+        }
+        EntityType<?> t = entityType(entry);
+        SpawnEggItem egg = t == null ? null : SpawnEggItem.byId(t);
+        return egg == null ? ItemStack.EMPTY : new ItemStack(egg);
+    }
+
+    /**
+     * Lista para elegir: los grupos, las facciones, las criaturas del mundo y todas las entidades con vida del juego
+     * (las que contienen lo escrito, si se ha escrito algo).
+     */
+    private void openFactionDropdown(int ax, int ay, int aw, int ah, String filter, Consumer<String> onPick) {
+        String q = filter.trim().toLowerCase(Locale.ROOT);
+        List<String> ids = new ArrayList<>();
+        List<DropItem> items = new ArrayList<>();
+        for (String entry : FACTION_QUICK) {
+            addDropEntity(ids, items, q, entry, Ui.tr("faction.entry.group", entityLabel(entry)).getString());
+        }
+        for (String f : knownFactions(true)) {
+            addDropEntity(ids, items, q, Factions.FACTION + f, entityLabel(Factions.FACTION + f).getString());
+        }
+        for (CreatureDefinition c : CreatureStore.CLIENT.sorted()) {
+            if (!c.id.equals(def.id)) {
+                int before = items.size();
+                addDropEntity(ids, items, q, Factions.CREATURE + c.id, entityLabel(Factions.CREATURE + c.id).getString());
+                if (items.size() > before) {
+                    DropItem it = items.get(before);
+                    items.set(before, new DropItem(it.label(), 0xFF000000 | c.eggColor1, 0, false));
+                }
+            }
+        }
+        for (ResourceLocation rl : entityIds()) {
+            if (items.size() >= 2000) {
+                break;
+            }
+            String shown = rl.getNamespace().equals("minecraft") ? rl.getPath() : rl.toString();
+            addDropEntity(ids, items, q, rl.toString(),
+                    BuiltInRegistries.ENTITY_TYPE.get(rl).getDescription().getString() + "  \u00B7 " + shown);
+        }
+        if (items.isEmpty()) {
+            warn(Ui.tr("faction.no_match", filter.trim()));
+            return;
+        }
+        dropdown = new Dropdown(ax, ay, aw, ah, items, i -> onPick.accept(ids.get(i)));
+        setFocused(null);
+    }
+
+    private static void addDropEntity(List<String> ids, List<DropItem> items, String q, String entry, String label) {
+        if (!q.isEmpty() && !entry.toLowerCase(Locale.ROOT).contains(q) && !label.toLowerCase(Locale.ROOT).contains(q)) {
+            return;
+        }
+        ids.add(entry);
+        items.add(new DropItem(Component.literal(label), -1, 0, false));
     }
 
     // ---------------------------------------------------------------------------------------
@@ -3973,7 +4317,16 @@ public class EditorScreen extends Screen {
             } else if (hovered == i) {
                 g.fill(x, top, x + w, top + TAB_H, 0xFF2A2E38);
             }
-            g.renderItem(t.icon(), x + (w - 16) / 2, top + 2);
+            if (w >= 17) {
+                g.renderItem(t.icon(), x + (w - 16) / 2, top + 2);
+            } else {
+                float sc = Math.max(0.5f, (w - 1) / 16f);
+                g.pose().pushPose();
+                g.pose().translate(x + (w - 16 * sc) / 2f, top + 2 + (16 - 16 * sc) / 2f, 0f);
+                g.pose().scale(sc, sc, 1f);
+                g.renderItem(t.icon(), 0, 0);
+                g.pose().popPose();
+            }
         }
         g.hLine(panelX + 1, width, top + TAB_H, Ui.BORDER);
         // titulo de la pestana
@@ -5677,6 +6030,54 @@ public class EditorScreen extends Screen {
     }
 
     /** Colores rapidos. */
+    /** Facciones: una entrada de la lista de enemigos o aliados, con su icono y su nombre. */
+    private final class EntityEntry extends Element {
+        private final Supplier<String> entry;
+        @Nullable
+        private String cachedEntry;
+        private ItemStack icon = ItemStack.EMPTY;
+        private String label = "";
+        private boolean known;
+
+        EntityEntry(int x, int y, int w, Supplier<String> entry) {
+            super(x, y, w, FIELD_H);
+            this.entry = entry;
+        }
+
+        private void refresh() {
+            String e = entry.get();
+            if (!e.equals(cachedEntry)) {
+                cachedEntry = e;
+                icon = entityIcon(e);
+                label = entityLabel(e).getString();
+                known = entityKnown(e);
+            }
+        }
+
+        @Override
+        void render(GuiGraphics g, int mx, int my) {
+            refresh();
+            int l = left();
+            int t = top();
+            g.fill(l, t, l + w, t + h, 0xFF1A1C21);
+            g.renderOutline(l, t, w, h, Ui.BORDER);
+            int tx = l + 4;
+            if (!icon.isEmpty()) {
+                g.renderItem(icon, l, t);
+                tx = l + 19;
+            }
+            String shown = font.plainSubstrByWidth(label, Math.max(10, l + w - 3 - tx));
+            g.drawString(font, shown, tx, t + (h - 8) / 2, known ? Ui.TEXT : Ui.ERROR, false);
+        }
+
+        @Override
+        List<FormattedCharSequence> tooltip(double mx, double my) {
+            refresh();
+            return tip(known ? Component.literal(label + "  (" + cachedEntry + ")")
+                    : Ui.tr("faction.unknown", cachedEntry));
+        }
+    }
+
     /** Pintar toda la criatura: sus colores principales (como estan ahora); el marcado es el que se cambia. */
     private final class ColorChoices extends Element {
         private static final int SIZE = 16;
